@@ -1,8 +1,17 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+import path from "path";
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      tslib: path.resolve(__dirname, "node_modules/tslib/tslib.es6.mjs")
+    }
+  },
+  optimizeDeps: {
+    include: ["@supabase/supabase-js", "tslib"]
+  },
   plugins: [
     react(),
     VitePWA({

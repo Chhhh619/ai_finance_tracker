@@ -9,7 +9,7 @@ interface DashboardPageProps {
   categories: Category[];
 }
 
-export default function DashboardPage({ categories }: DashboardPageProps) {
+export default function DashboardPage({}: DashboardPageProps) {
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
   const [monthTotal, setMonthTotal] = useState(0);
   const [reviewCount, setReviewCount] = useState(0);
