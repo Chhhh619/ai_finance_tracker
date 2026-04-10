@@ -8,8 +8,9 @@ const corsHeaders = {
 };
 
 const requestSchema = z.object({
-  text: z.string().min(1).max(10000),
-  source: z.enum(["auto", "receipt"]),
+  text: z.string().min(1).max(10000).optional(),
+  image: z.string().optional(), // base64 encoded image
+  source: z.enum(["auto", "receipt"]).default("auto"),
   timestamp: z.string().optional(),
 });
 
@@ -18,63 +19,105 @@ const transactionSchema = z.object({
   merchant: z.string().min(1),
   direction: z.enum(["expense", "income"]),
   category: z.string().min(1),
-  source: z.enum(["ewallet", "bank"]),
+  source: z.enum(["ewallet", "bank", "manual", "receipt"]),
   confidence: z.number().min(0).max(1),
   transaction_at: z.string().optional(),
 });
 
 const llmResponseSchema = z.array(transactionSchema);
 
-async function callGeminiFlash(text: string, categoryNames: string[], apiKey: string): Promise<z.infer<typeof llmResponseSchema> | null> {
+async function callGeminiFlash(
+  text: string | undefined,
+  imageBase64: string | undefined,
+  categoryNames: string[],
+  apiKey: string,
+  source: string
+): Promise<z.infer<typeof llmResponseSchema> | null> {
   const systemPrompt = [
-    "You are a Malaysian financial transaction extractor.",
-    "From the following text captured from an iPhone screen, extract ONLY financial transactions.",
-    "Ignore all non-financial content (app names, status bar, widgets, time, battery, unrelated notifications).",
+    "You are a financial transaction extractor for a Malaysian budgeting app.",
+    "Extract financial transactions from the input (bank notifications, e-wallet notifications, receipts, or any spending text).",
+    "",
+    "IMPORTANT RULES:",
+    "- For receipts: extract ONE transaction using the FINAL TOTAL amount (after tax/service charge). Do NOT extract subtotals, individual items, or tax lines as separate transactions.",
+    "- For bank/e-wallet notifications: extract each distinct transaction.",
+    "- The merchant should be the store or business name, NOT individual item names.",
+    "- If the input has multiple unrelated transactions (e.g. several notifications), extract each one.",
     "",
     `Assign ONE category from this list: ${categoryNames.join(", ")}.`,
     "If none fit well, use 'Others' and set confidence lower.",
     "",
     "For each transaction return a JSON object with:",
-    '- amount: number (positive, in MYR)',
-    '- merchant: string (merchant or recipient name)',
+    "- amount: number (positive, the final amount paid in MYR)",
+    "- merchant: string (business/store name, e.g. 'McDonald's', 'Grab', 'Touch n Go')",
     '- direction: "expense" or "income"',
-    '- category: string (from the list above)',
-    '- source: "ewallet" or "bank" (infer from context)',
-    '- confidence: number 0-1',
-    '- transaction_at: ISO datetime string if you can infer it, otherwise omit',
+    "- category: string (from the list above)",
+    `- source: "${source === "receipt" ? "receipt" : "manual"}" (use this exact value)`,
+    "- confidence: number 0-1",
+    "- transaction_at: ISO datetime string if visible, otherwise omit",
     "",
     "Return a JSON array only. No markdown, no explanation.",
-    "If no financial transaction is found, return an empty array: []",
+    "If no financial transaction is found, return: []",
   ].join("\n");
 
+  const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
+
+  if (text) {
+    parts.push({ text });
+  }
+
+  if (imageBase64) {
+    // Detect mime type from base64 header or default to jpeg
+    let mimeType = "image/jpeg";
+    if (imageBase64.startsWith("data:")) {
+      const match = imageBase64.match(/^data:([^;]+);base64,/);
+      if (match) {
+        mimeType = match[1];
+        // Remove the data URL prefix
+        imageBase64 = imageBase64.replace(/^data:[^;]+;base64,/, "");
+      }
+    }
+    parts.push({ inlineData: { mimeType, data: imageBase64 } });
+  }
+
+  if (parts.length === 0) return null;
+
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         system_instruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ parts: [{ text }] }],
+        contents: [{ parts }],
         generationConfig: {
           temperature: 0.1,
           responseMimeType: "application/json",
+          thinking_config: { thinking_budget: 0 },
         },
       }),
     }
   );
 
-  if (!response.ok) return null;
+  if (!response.ok) {
+    const errText = await response.text();
+    console.error("Gemini API error:", response.status, errText);
+    return { transactions: null, debug: { error: `Gemini ${response.status}`, detail: errText } };
+  }
 
   const data = await response.json();
   const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!content) return null;
+  if (!content) return { transactions: null, debug: { error: "No content in Gemini response", raw: JSON.stringify(data).slice(0, 500) } };
 
   try {
     const parsed = JSON.parse(content);
     const validated = llmResponseSchema.safeParse(parsed);
-    return validated.success ? validated.data : null;
-  } catch {
-    return null;
+    if (!validated.success) {
+      console.error("Zod validation failed:", validated.error.issues);
+      return { transactions: null, debug: { error: "Validation failed", llmOutput: content, zodErrors: validated.error.issues } };
+    }
+    return { transactions: validated.data, debug: { llmOutput: content } };
+  } catch (e) {
+    return { transactions: null, debug: { error: "JSON parse failed", llmOutput: content, parseError: String(e) } };
   }
 }
 
@@ -145,6 +188,13 @@ Deno.serve(async (req) => {
     });
   }
 
+  if (!body.text && !body.image) {
+    return new Response(JSON.stringify({ status: "error", message: "Either text or image is required" }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   const { data: categories } = await supabase
     .from("categories")
     .select("id, name")
@@ -153,10 +203,12 @@ Deno.serve(async (req) => {
   const categoryNames = (categories ?? []).map((c: { name: string }) => c.name);
   const categoryMap = new Map((categories ?? []).map((c: { id: string; name: string }) => [c.name.toLowerCase(), c.id]));
 
-  const transactions = await callGeminiFlash(body.text, categoryNames, geminiApiKey);
+  const geminiResult = await callGeminiFlash(body.text, body.image, categoryNames, geminiApiKey, body.source);
+  const transactions = geminiResult.transactions;
+  const debug = geminiResult.debug;
 
   if (!transactions || transactions.length === 0) {
-    return new Response(JSON.stringify({ status: "empty", message: "No transaction detected" }), {
+    return new Response(JSON.stringify({ status: "empty", message: "No transaction detected", debug }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -201,7 +253,7 @@ Deno.serve(async (req) => {
     category_id: categoryMap.get(t.category.toLowerCase()) ?? categoryMap.get("others") ?? null,
     source: body.source === "receipt" ? "receipt" as const : t.source,
     confidence: t.confidence,
-    raw_text: body.text,
+    raw_text: body.text ?? "(image)",
     needs_review: t.confidence < 0.7,
     transaction_at: t.transaction_at ?? body.timestamp ?? new Date().toISOString(),
   }));
@@ -226,6 +278,7 @@ Deno.serve(async (req) => {
     status: "ok",
     entries: inserted,
     message: messages.join("; ") || "Transaction recorded",
+    debug,
   }), {
     status: 200,
     headers: { ...corsHeaders, "Content-Type": "application/json" },

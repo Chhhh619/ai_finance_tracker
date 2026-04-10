@@ -31,6 +31,7 @@ export interface Transaction {
 
 export interface UserSettings {
   user_id: string;
+  display_name: string | null;
   duplicate_handling: DuplicateHandling;
   default_currency: string;
   ai_model: string;

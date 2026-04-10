@@ -11,6 +11,26 @@ export async function getUser(): Promise<User | null> {
   return data.user;
 }
 
+export async function signUpWithPassword(email: string, password: string): Promise<{ error: string | null }> {
+  const { error } = await supabase.auth.signUp({ email, password });
+  return { error: error?.message ?? null };
+}
+
+export async function signInWithPassword(email: string, password: string): Promise<{ error: string | null }> {
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  return { error: error?.message ?? null };
+}
+
+export async function signInWithGoogle(): Promise<{ error: string | null }> {
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: window.location.origin,
+    },
+  });
+  return { error: error?.message ?? null };
+}
+
 export async function signInWithMagicLink(email: string): Promise<{ error: string | null }> {
   const { error } = await supabase.auth.signInWithOtp({ email });
   return { error: error?.message ?? null };

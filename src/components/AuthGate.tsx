@@ -14,9 +14,9 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (session === undefined) {
     return (
-      <div className="auth-loading">
-        <p className="app-brand">PocketRinggit AI</p>
-        <p>Loading...</p>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-white">
+        <p className="text-[2rem] font-semibold tracking-tight">PocketRinggit</p>
+        <div className="mt-4 w-5 h-5 border-2 border-gray-300 border-t-[#4169e1] rounded-full animate-spin" />
       </div>
     );
   }

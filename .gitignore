@@ -3,6 +3,9 @@ dist
 .DS_Store
 *.log
 .env
+.env.local
 .agents/
 .claude/
 skills-lock.json
+supabase/.temp/
+Budgeting app UI design/
