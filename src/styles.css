@@ -473,3 +473,241 @@ body {
     justify-self: start;
   }
 }
+
+/* Login page */
+.login-page {
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.login-card {
+  width: min(400px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  border-radius: 24px;
+  padding: 28px 20px;
+  box-shadow: 0 14px 28px rgba(17, 45, 77, 0.08);
+}
+
+.login-card h1 {
+  margin: 8px 0 4px;
+  font-family: "Sora", "Outfit", sans-serif;
+}
+
+.login-subtitle {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.login-email {
+  margin-bottom: 10px;
+  min-height: auto;
+  resize: none;
+}
+
+.login-button {
+  width: 100%;
+}
+
+/* Auth loading */
+.auth-loading {
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  color: var(--muted);
+}
+
+/* Filters */
+.filters-row {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.filter-input {
+  width: 100%;
+  border: 1px solid #d0dae8;
+  border-radius: 12px;
+  padding: 10px 11px;
+  font: inherit;
+}
+
+.filter-select {
+  width: 100%;
+  border: 1px solid #d0dae8;
+  border-radius: 12px;
+  padding: 10px 11px;
+  font: inherit;
+  background: #fff;
+}
+
+.filter-toggle {
+  font-size: 0.88rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+/* Review indicators */
+.review-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f59e0b;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.review-badge {
+  display: inline-block;
+  background: #f59e0b;
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 2px 5px;
+  margin-left: 4px;
+  vertical-align: top;
+}
+
+.needs-review {
+  border-color: #fcd34d;
+  background: rgba(253, 224, 71, 0.08);
+}
+
+/* Entry edit */
+.entry-edit {
+  display: grid;
+  gap: 8px;
+  grid-column: 1 / -1;
+}
+
+/* Load more */
+.load-more {
+  margin-top: 12px;
+  width: 100%;
+}
+
+/* Mode toggle */
+.mode-toggle {
+  display: flex;
+  gap: 4px;
+  background: #edf2f9;
+  border-radius: 10px;
+  padding: 3px;
+}
+
+.mode-btn {
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.mode-btn.active {
+  background: #fff;
+  color: var(--brand);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Manual form */
+.manual-form {
+  display: grid;
+  gap: 8px;
+}
+
+.manual-form .text-input {
+  min-height: auto;
+  resize: none;
+}
+
+/* Settings */
+.settings-section {
+  padding: 14px 0;
+  border-bottom: 1px solid #e5edf8;
+}
+
+.settings-section:last-of-type {
+  border-bottom: none;
+}
+
+.settings-section h3 {
+  margin: 0 0 4px;
+  font-family: "Sora", "Outfit", sans-serif;
+  font-size: 0.95rem;
+}
+
+.settings-detail {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.api-key-display {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  background: #edf2f9;
+  border-radius: 8px;
+  padding: 10px;
+  word-break: break-all;
+  user-select: all;
+}
+
+/* Danger button */
+.button-danger {
+  color: #fff;
+  background: #ef4444;
+}
+
+/* Chip delete */
+.chip-delete {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.75rem;
+  margin-left: 4px;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.category-chip-wrap {
+  display: inline-block;
+}
+
+.category-edit-inline {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.category-edit-inline input {
+  border: 1px solid #d0dae8;
+  border-radius: 8px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 0.82rem;
+  width: 100px;
+}
+
+.category-edit-inline button {
+  border: none;
+  background: var(--brand-soft);
+  color: var(--brand);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
