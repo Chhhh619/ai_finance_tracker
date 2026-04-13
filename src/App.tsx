@@ -8,6 +8,7 @@ import CategoriesPage from "./pages/CategoriesPage";
 import SettingsPage from "./pages/SettingsPage";
 import { fetchCategories, fetchSettings, updateSettings } from "./lib/api";
 import { setupOnlineSync } from "./lib/offline-queue";
+import { onAuthStateChange } from "./lib/auth";
 import type { Category } from "./types";
 
 function AppShell() {
@@ -24,15 +25,24 @@ function AppShell() {
     }
   }, []);
 
-  useEffect(() => {
+  const loadInitialData = useCallback(() => {
     void loadCategories();
-    setupOnlineSync();
-
-    // Load display name from DB
     void fetchSettings().then((s) => {
       if (s.display_name) setDisplayName(s.display_name);
     }).catch(() => {});
+    setRefreshKey((k) => k + 1);
   }, [loadCategories]);
+
+  useEffect(() => {
+    loadInitialData();
+    setupOnlineSync();
+
+    // Re-fetch all data when auth token refreshes (e.g., after session expiry)
+    const unsubscribe = onAuthStateChange((session) => {
+      if (session) loadInitialData();
+    });
+    return unsubscribe;
+  }, [loadInitialData]);
 
   const handleDataChanged = useCallback(() => {
     setRefreshKey((k) => k + 1);

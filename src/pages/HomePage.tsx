@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Plus, X, Image as ImageIcon } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { fetchTransactions, createManualTransaction, updateTransaction, deleteTransaction } from "../lib/api";
 import { supabase } from "../lib/supabase";
 import { addToQueue, getQueue } from "../lib/offline-queue";
@@ -50,6 +51,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
   const [editCategory, setEditCategory] = useState("");
   const [showCatPicker, setShowCatPicker] = useState(false);
   const [showFab, setShowFab] = useState(true);
+  const [chartCategoryId, setChartCategoryId] = useState<string | null>(null);
   const lastScrollY = useRef(0);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -122,14 +124,18 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
   }, []);
 
   const loadData = useCallback(async () => {
-    const [fromDate, toDate] = getDateRange(period);
-    const txns = await fetchTransactions({ from_date: fromDate, to_date: toDate, limit: 100 });
-    setTransactions(txns);
+    try {
+      const [fromDate, toDate] = getDateRange(period);
+      const txns = await fetchTransactions({ from_date: fromDate, to_date: toDate, limit: 100 });
+      setTransactions(txns);
 
-    const expenseTotal = txns
-      .filter((t) => t.direction === "expense")
-      .reduce((sum, t) => sum + Number(t.amount), 0);
-    setTotal(expenseTotal);
+      const expenseTotal = txns
+        .filter((t) => t.direction === "expense")
+        .reduce((sum, t) => sum + Number(t.amount), 0);
+      setTotal(expenseTotal);
+    } catch {
+      // Will retry when auth token refreshes
+    }
   }, [period, getDateRange]);
 
   useEffect(() => {
@@ -326,23 +332,49 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
         </h1>
       </div>
 
-      {/* Breakdown */}
+      {/* Breakdown Chart */}
       {breakdown.length > 0 && (
         <div className="mb-10">
           <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-4">Breakdown</h2>
-          <div className="space-y-3">
-            {breakdown.slice(0, 6).map(({ category, total: catTotal, percentage }) => (
-              <div key={category.id} className="flex items-center justify-between">
-                <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <div className="w-1 h-10 rounded-full shrink-0" style={{ backgroundColor: category.color }} />
-                  <div className="min-w-0">
-                    <div className="font-medium text-[15px] truncate">{category.name}</div>
-                    <div className="text-xs text-gray-400">{Math.round(percentage)}%</div>
-                  </div>
-                </div>
-                <div className="text-base font-semibold ml-4">{moneyFmt(catTotal)}</div>
-              </div>
-            ))}
+          <div className="bg-gray-50 rounded-2xl p-4 -mx-1">
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart
+                data={breakdown.slice(0, 6).map(({ category, total: catTotal }) => ({
+                  name: category.name,
+                  amount: catTotal,
+                  color: category.color,
+                }))}
+                margin={{ top: 8, right: 12, left: -8, bottom: 4 }}
+              >
+                <XAxis
+                  dataKey="name"
+                  tick={{ fontSize: 11, fill: "#9ca3af" }}
+                  axisLine={false}
+                  tickLine={false}
+                  interval={0}
+                  angle={-20}
+                  textAnchor="end"
+                  height={40}
+                />
+                <YAxis
+                  tick={{ fontSize: 11, fill: "#9ca3af" }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v: number) => `${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v}`}
+                  width={45}
+                />
+                <Tooltip
+                  formatter={(value: number) => [moneyFmt(value), "Amount"]}
+                  contentStyle={{ borderRadius: 12, border: "none", boxShadow: "0 4px 12px rgba(0,0,0,0.08)", fontSize: 13 }}
+                  cursor={{ fill: "rgba(65,105,225,0.06)", radius: 8 }}
+                />
+                <Bar dataKey="amount" radius={[8, 8, 0, 0]} barSize={32}>
+                  {breakdown.slice(0, 6).map(({ category }) => (
+                    <Cell key={category.id} fill={category.color} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
           </div>
         </div>
       )}
@@ -443,8 +475,11 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                                 </div>
                               </div>
                             </div>
-                            <div className="font-semibold text-[15px] ml-4">
-                              -{moneyFmt(Number(t.amount))}
+                            <div className="text-right ml-4 shrink-0">
+                              <div className="font-semibold text-[15px]">-{moneyFmt(Number(t.amount))}</div>
+                              <div className="text-[10px] text-gray-400">
+                                {new Date(t.transaction_at).toLocaleTimeString("en-MY", { hour: "2-digit", minute: "2-digit" })}
+                              </div>
                             </div>
                           </div>
 
@@ -591,7 +626,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
           <>
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowChart(false)}
+              className="fixed inset-0 bg-black/40 z-40" onClick={() => { setShowChart(false); setChartCategoryId(null); }}
             />
             <motion.div
               initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 40 }}
@@ -601,7 +636,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
               <div className="p-6">
                 <div className="flex items-center justify-between mb-2">
                   <h2 className="text-2xl font-bold">{moneyFmt(total)}</h2>
-                  <button onClick={() => setShowChart(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                  <button onClick={() => { setShowChart(false); setChartCategoryId(null); }} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
                     <X size={20} />
                   </button>
                 </div>
@@ -620,20 +655,58 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                     {/* Category cards */}
                     <div className="space-y-2.5">
                       {breakdown.map(({ category, total: catTotal, percentage }) => (
-                        <div key={category.id} className="flex items-center justify-between p-3.5 rounded-2xl bg-gray-50">
-                          <div className="flex items-center gap-3">
-                            <div
-                              className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-bold"
-                              style={{ backgroundColor: category.color }}
-                            >
-                              {category.name[0]}
+                        <div key={category.id}>
+                          <button
+                            onClick={() => setChartCategoryId(chartCategoryId === category.id ? null : category.id)}
+                            className={`w-full flex items-center justify-between p-3.5 rounded-2xl transition-colors text-left ${
+                              chartCategoryId === category.id ? "bg-gray-100" : "bg-gray-50 active:bg-gray-100"
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <div
+                                className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-bold"
+                                style={{ backgroundColor: category.color }}
+                              >
+                                {category.name[0]}
+                              </div>
+                              <div>
+                                <div className="font-medium text-[15px]">{category.name}</div>
+                                <div className="text-xs text-gray-400">{Math.round(percentage)}%</div>
+                              </div>
                             </div>
-                            <div>
-                              <div className="font-medium text-[15px]">{category.name}</div>
-                              <div className="text-xs text-gray-400">{Math.round(percentage)}%</div>
-                            </div>
-                          </div>
-                          <div className="font-semibold">{moneyFmt(catTotal)}</div>
+                            <div className="font-semibold">{moneyFmt(catTotal)}</div>
+                          </button>
+
+                          {/* Expanded transaction list for this category */}
+                          <AnimatePresence>
+                            {chartCategoryId === category.id && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: "auto", opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ type: "spring", damping: 25, stiffness: 300 }}
+                                className="overflow-hidden"
+                              >
+                                <div className="pt-1.5 pb-1 px-2 space-y-0.5">
+                                  {transactions
+                                    .filter((t) => t.direction === "expense" && t.category_id === category.id)
+                                    .map((t) => (
+                                      <div key={t.id} className="flex items-center justify-between py-2.5 px-3 rounded-xl bg-white">
+                                        <div className="min-w-0">
+                                          <div className="font-medium text-[14px] truncate">{t.merchant}</div>
+                                          <div className="text-[11px] text-gray-400">
+                                            {new Date(t.transaction_at).toLocaleDateString("en-MY", { day: "numeric", month: "short" })}
+                                            {" "}
+                                            {new Date(t.transaction_at).toLocaleTimeString("en-MY", { hour: "2-digit", minute: "2-digit" })}
+                                          </div>
+                                        </div>
+                                        <div className="font-semibold text-[14px] ml-4 shrink-0">-{moneyFmt(Number(t.amount))}</div>
+                                      </div>
+                                    ))}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </div>
                       ))}
                     </div>

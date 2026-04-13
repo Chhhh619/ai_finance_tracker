@@ -5,6 +5,7 @@ import { signOut, registerPasskey } from "../lib/auth";
 import { supabase } from "../lib/supabase";
 import { getQueue, flushQueue } from "../lib/offline-queue";
 import { LogOut, Fingerprint, Download, RefreshCw, ChevronRight, Copy, Check } from "lucide-react";
+import * as XLSX from "xlsx";
 import type { DuplicateHandling, UserSettings } from "../types";
 
 const duplicateOptions: { value: DuplicateHandling; label: string; desc: string }[] = [
@@ -40,19 +41,21 @@ export default function SettingsPage() {
     setStatus(error ?? "Face ID enabled!");
   };
 
-  const handleExportCSV = async () => {
+  const handleExportXLSX = async () => {
     setStatus("Exporting...");
     try {
       const txns = await fetchTransactions({ limit: 10000 });
-      const headers = "Date,Merchant,Amount,Direction,Category,Source\n";
-      const rows = txns.map((t) =>
-        `"${t.transaction_at}","${t.merchant}",${t.amount},"${t.direction}","${t.category?.name ?? ""}","${t.source}"`
-      ).join("\n");
-      const blob = new Blob([headers + rows], { type: "text/csv" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = `pocketringgit-${new Date().toISOString().slice(0, 10)}.csv`;
-      a.click(); URL.revokeObjectURL(url);
+      const rows = txns.map((t) => {
+        const d = new Date(t.transaction_at);
+        const pad = (n: number) => String(n).padStart(2, "0");
+        const date = `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${String(d.getFullYear()).slice(-2)}`;
+        const time = `${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
+        return { Date: date, Time: time, Merchant: t.merchant, Amount: Number(t.amount), Direction: t.direction, Category: t.category?.name ?? "", Source: t.source };
+      });
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Transactions");
+      XLSX.writeFile(wb, `pocketringgit-${new Date().toISOString().slice(0, 10)}.xlsx`);
       setStatus("Exported!");
     } catch { setStatus("Export failed."); }
   };
@@ -193,11 +196,11 @@ export default function SettingsPage() {
       <section className="mb-6">
         <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Data</h2>
         <button
-          onClick={() => void handleExportCSV()}
+          onClick={() => void handleExportXLSX()}
           className="flex items-center gap-3 px-4 py-3.5 bg-gray-50 rounded-2xl w-full active:bg-gray-100 transition-colors"
         >
           <Download size={18} className="text-gray-500" />
-          <span className="text-[15px]">Export as CSV</span>
+          <span className="text-[15px]">Export as XLSX</span>
         </button>
       </section>
 

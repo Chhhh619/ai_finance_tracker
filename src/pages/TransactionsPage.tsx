@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { fetchTransactions, updateTransaction, deleteTransaction, type TransactionFilters } from "../lib/api";
-import { Search, CalendarDays, X } from "lucide-react";
+import { Search, CalendarDays, X, ChevronDown } from "lucide-react";
 import Calendar, { toKey } from "../components/Calendar";
 import CategoryPicker from "../components/CategoryPicker";
 import type { Category, Transaction } from "../types";
@@ -49,6 +49,10 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
   const [dateMode, setDateMode] = useState<DateFilterMode>("all");
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
 
+  // Custom filter pickers
+  const [showSourcePicker, setShowSourcePicker] = useState(false);
+  const [showCategoryFilter, setShowCategoryFilter] = useState(false);
+
   const PAGE_SIZE = 50;
 
   const dateRange = useMemo((): { from?: string; to?: string; label: string } => {
@@ -86,20 +90,25 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
 
   const loadTransactions = useCallback(async (reset = false) => {
     setLoading(true);
-    const newOffset = reset ? 0 : offset;
-    const filters: TransactionFilters = { limit: PAGE_SIZE, offset: newOffset };
-    if (search) filters.search = search;
-    if (filterSource) filters.source = filterSource;
-    if (filterCategory) filters.category_id = filterCategory;
-    if (showReviewOnly) filters.needs_review = true;
-    if (dateRange.from) filters.from_date = dateRange.from;
-    if (dateRange.to) filters.to_date = dateRange.to;
+    try {
+      const newOffset = reset ? 0 : offset;
+      const filters: TransactionFilters = { limit: PAGE_SIZE, offset: newOffset };
+      if (search) filters.search = search;
+      if (filterSource) filters.source = filterSource;
+      if (filterCategory) filters.category_id = filterCategory;
+      if (showReviewOnly) filters.needs_review = true;
+      if (dateRange.from) filters.from_date = dateRange.from;
+      if (dateRange.to) filters.to_date = dateRange.to;
 
-    const data = await fetchTransactions(filters);
-    if (reset) { setTransactions(data); setOffset(PAGE_SIZE); }
-    else { setTransactions((prev) => [...prev, ...data]); setOffset(newOffset + PAGE_SIZE); }
-    setHasMore(data.length === PAGE_SIZE);
-    setLoading(false);
+      const data = await fetchTransactions(filters);
+      if (reset) { setTransactions(data); setOffset(PAGE_SIZE); }
+      else { setTransactions((prev) => [...prev, ...data]); setOffset(newOffset + PAGE_SIZE); }
+      setHasMore(data.length === PAGE_SIZE);
+    } catch {
+      // Will retry when auth token refreshes
+    } finally {
+      setLoading(false);
+    }
   }, [search, filterSource, filterCategory, showReviewOnly, offset, dateRange]);
 
   useEffect(() => {
@@ -235,27 +244,40 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2 mb-4">
-        <select
-          className="h-9 px-3 bg-gray-50 rounded-lg text-sm outline-none"
-          value={filterSource} onChange={(e) => setFilterSource(e.target.value)}
+        <button
+          onClick={() => setShowSourcePicker(true)}
+          className={`h-9 px-3 rounded-xl text-sm flex items-center gap-1.5 transition-colors touch-manipulation ${
+            filterSource ? "bg-[#4169e1] text-white" : "bg-gray-50 text-gray-600 active:bg-gray-100"
+          }`}
         >
-          <option value="">All sources</option>
-          <option value="ewallet">E-wallet</option>
-          <option value="bank">Bank</option>
-          <option value="manual">Manual</option>
-          <option value="receipt">Receipt</option>
-        </select>
-        <select
-          className="h-9 px-3 bg-gray-50 rounded-lg text-sm outline-none"
-          value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}
+          <span>{filterSource ? { ewallet: "E-wallet", bank: "Bank", manual: "Manual", receipt: "Receipt" }[filterSource] : "All sources"}</span>
+          <ChevronDown size={14} />
+        </button>
+        <button
+          onClick={() => setShowCategoryFilter(true)}
+          className={`h-9 px-3 rounded-xl text-sm flex items-center gap-1.5 transition-colors touch-manipulation ${
+            filterCategory ? "bg-[#4169e1] text-white" : "bg-gray-50 text-gray-600 active:bg-gray-100"
+          }`}
         >
-          <option value="">All categories</option>
-          {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+          {filterCategory ? (
+            <>
+              <div
+                className="w-4 h-4 rounded-md text-white text-[8px] font-bold flex items-center justify-center shrink-0"
+                style={{ backgroundColor: filterCategory ? (categories.find((c) => c.id === filterCategory)?.color ?? "#9298a6") : undefined }}
+              >
+                {categories.find((c) => c.id === filterCategory)?.name[0] ?? ""}
+              </div>
+              <span>{categories.find((c) => c.id === filterCategory)?.name}</span>
+            </>
+          ) : (
+            <span>All categories</span>
+          )}
+          <ChevronDown size={14} />
+        </button>
         <button
           onClick={() => setShowReviewOnly(!showReviewOnly)}
-          className={`h-9 px-3 rounded-lg text-sm transition-colors ${
-            showReviewOnly ? "bg-amber-100 text-amber-700" : "bg-gray-50 text-gray-600"
+          className={`h-9 px-3 rounded-xl text-sm transition-colors touch-manipulation ${
+            showReviewOnly ? "bg-amber-100 text-amber-700" : "bg-gray-50 text-gray-600 active:bg-gray-100"
           }`}
         >
           Review
@@ -356,8 +378,13 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
                               <div className="text-xs text-gray-400">{t.category?.name ?? "Uncategorized"}</div>
                             </div>
                           </div>
-                          <div className="font-semibold text-[15px] ml-4">
-                            {t.direction === "expense" ? "-" : "+"}{moneyFmt(Number(t.amount))}
+                          <div className="text-right ml-4 shrink-0">
+                            <div className="font-semibold text-[15px]">
+                              {t.direction === "expense" ? "-" : "+"}{moneyFmt(Number(t.amount))}
+                            </div>
+                            <div className="text-[10px] text-gray-400">
+                              {new Date(t.transaction_at).toLocaleTimeString("en-MY", { hour: "2-digit", minute: "2-digit" })}
+                            </div>
                           </div>
                         </div>
 
@@ -471,6 +498,106 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
         selected={editCategory}
         onSelect={setEditCategory}
       />
+
+      {/* Source Filter Picker */}
+      <AnimatePresence>
+        {showSourcePicker && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowSourcePicker(false)}
+            />
+            <motion.div
+              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 28, stiffness: 300 }}
+              className="fixed inset-x-0 bottom-0 bg-white rounded-t-3xl z-50 max-w-md mx-auto"
+              style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 16px)" }}
+            >
+              <div className="px-6 pt-5 pb-4">
+                <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-5" />
+                <h2 className="text-lg font-semibold mb-4">Source</h2>
+                <div className="space-y-2">
+                  {[
+                    { value: "", label: "All sources" },
+                    { value: "ewallet", label: "E-wallet" },
+                    { value: "bank", label: "Bank" },
+                    { value: "manual", label: "Manual" },
+                    { value: "receipt", label: "Receipt" },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => { setFilterSource(opt.value); setShowSourcePicker(false); }}
+                      className={`w-full py-3.5 px-4 rounded-2xl text-left text-[15px] font-medium transition-all touch-manipulation ${
+                        filterSource === opt.value
+                          ? "bg-[#4169e1] text-white"
+                          : "bg-gray-50 text-gray-700 active:bg-gray-100"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Category Filter Picker */}
+      <AnimatePresence>
+        {showCategoryFilter && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowCategoryFilter(false)}
+            />
+            <motion.div
+              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 28, stiffness: 300 }}
+              className="fixed inset-x-0 bottom-0 bg-white rounded-t-3xl z-50 max-w-md mx-auto"
+              style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 16px)" }}
+            >
+              <div className="px-6 pt-5 pb-4">
+                <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-5" />
+                <h2 className="text-lg font-semibold mb-4">Category</h2>
+                <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+                  <button
+                    onClick={() => { setFilterCategory(""); setShowCategoryFilter(false); }}
+                    className={`w-full py-3.5 px-4 rounded-2xl text-left text-[15px] font-medium transition-all touch-manipulation ${
+                      !filterCategory
+                        ? "bg-[#4169e1] text-white"
+                        : "bg-gray-50 text-gray-700 active:bg-gray-100"
+                    }`}
+                  >
+                    All categories
+                  </button>
+                  {categories.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => { setFilterCategory(c.id); setShowCategoryFilter(false); }}
+                      className={`w-full py-3.5 px-4 rounded-2xl text-left text-[15px] font-medium flex items-center gap-3 transition-all touch-manipulation ${
+                        filterCategory === c.id
+                          ? "bg-[#4169e1] text-white"
+                          : "bg-gray-50 text-gray-700 active:bg-gray-100"
+                      }`}
+                    >
+                      <div
+                        className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${
+                          filterCategory === c.id ? "text-[#4169e1] bg-white/90" : "text-white"
+                        }`}
+                        style={filterCategory === c.id ? undefined : { backgroundColor: c.color }}
+                      >
+                        {c.name[0]}
+                      </div>
+                      <span>{c.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

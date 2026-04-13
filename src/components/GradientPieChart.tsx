@@ -24,28 +24,37 @@ export default function GradientPieChart({ segments, size = 220 }: GradientPieCh
   const radius = size / 2 - 4;
   const blurRadius = size * 0.08;
 
-  // Build conic gradient stops with overlap for blur blending
+  // Build conic gradient with white gaps between segments
+  const gapDeg = filteredSegments.length > 1 ? 1.5 : 0;
   let cumulative = 0;
   const conicStops: string[] = [];
 
   filteredSegments.forEach((seg, i) => {
-    const start = cumulative;
-    const end = cumulative + seg.percentage;
-    const startDeg = (start / 100) * 360;
-    const endDeg = (end / 100) * 360;
+    const startDeg = (cumulative / 100) * 360;
+    cumulative += seg.percentage;
+    const endDeg = (cumulative / 100) * 360;
 
-    if (i === 0) {
-      conicStops.push(`${seg.color} ${startDeg}deg`);
+    if (i > 0) {
+      // White gap before this segment
+      conicStops.push(`white ${startDeg - gapDeg}deg`);
+      conicStops.push(`white ${startDeg + gapDeg}deg`);
     }
-    conicStops.push(`${seg.color} ${endDeg}deg`);
 
-    cumulative = end;
+    conicStops.push(`${seg.color} ${startDeg + (i > 0 ? gapDeg : 0)}deg`);
+    conicStops.push(`${seg.color} ${endDeg - (i < filteredSegments.length - 1 ? gapDeg : 0)}deg`);
   });
+
+  // Close the loop: gap between last and first segment
+  if (filteredSegments.length > 1) {
+    const endDeg = 360;
+    conicStops.push(`white ${endDeg - gapDeg}deg`);
+    conicStops.push(`white ${endDeg}deg`);
+  }
 
   const conicGradient = `conic-gradient(from 0deg, ${conicStops.join(", ")})`;
 
   return (
-    <div className="relative" style={{ width: size, height: size }}>
+    <div className="relative pointer-events-none" style={{ width: size, height: size }}>
       {/* Base conic gradient circle */}
       <div
         className="absolute inset-0 rounded-full"
@@ -84,7 +93,6 @@ export default function GradientPieChart({ segments, size = 220 }: GradientPieCh
         className="absolute inset-0"
       >
         {filteredSegments.map((seg, i) => {
-          // Place label at midpoint of each segment
           let startAngle = 0;
           for (let j = 0; j < i; j++) {
             startAngle += filteredSegments[j].percentage;
