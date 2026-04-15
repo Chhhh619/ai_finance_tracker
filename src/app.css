@@ -37,3 +37,13 @@
 .safe-bottom {
   padding-bottom: max(env(safe-area-inset-bottom, 0px), 0px);
 }
+
+@keyframes reveal-down {
+  from { opacity: 0; transform: translate3d(0, -4px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+.reveal-down {
+  animation: reveal-down 160ms ease-out;
+  will-change: transform, opacity;
+}

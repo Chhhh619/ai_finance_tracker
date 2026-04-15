@@ -53,7 +53,7 @@ async function callGeminiFlash(
     "- category: string (from the list above)",
     `- source: "${source === "receipt" ? "receipt" : "manual"}" (use this exact value)`,
     "- confidence: number 0-1",
-    "- transaction_at: ISO datetime string if visible, otherwise omit",
+    `- transaction_at: ISO datetime string if visible, otherwise omit. The current date/time is ${new Date().toISOString()} (UTC). If the source shows only a date like "14 Apr" or "14/04" without a year, assume the current year. Never invent a year — if no date is visible at all, omit this field.`,
     "",
     "Return a JSON array only. No markdown, no explanation.",
     "If no financial transaction is found, return: []",
