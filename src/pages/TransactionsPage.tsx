@@ -244,6 +244,12 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
     setExportSubOpen(false);
   };
 
+  const enterSelection = () => {
+    setSelectionMode(true);
+    setDetailId(null);
+    setEditingId(null);
+  };
+
   const selectedTransactions = useMemo(
     () => transactions.filter((t) => selectedIds.has(t.id)),
     [transactions, selectedIds]
@@ -336,7 +342,7 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
         <div className="flex items-center gap-2 relative" data-more-popover>
           {!selectionMode ? (
             <button
-              onClick={() => setSelectionMode(true)}
+              onClick={enterSelection}
               className="h-8 px-3 rounded-xl text-xs font-medium bg-gray-50 text-gray-600 active:bg-gray-100 transition-colors touch-manipulation"
             >
               Select
@@ -467,17 +473,17 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
       </div>
 
       </div>
-      <div className="px-6 pt-3">
+      <div className="pt-3">
       {/* Transaction list */}
       {grouped.length === 0 && !loading ? (
-        <p className="text-gray-400 text-sm py-12 text-center">
+        <p className="text-gray-400 text-sm py-12 text-center px-6">
           {dateMode !== "all" ? `No transactions for ${dateRange.label}.` : "No transactions found."}
         </p>
       ) : (
         <div className="space-y-6">
           {grouped.map((group) => (
             <div key={group.date}>
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center justify-between mb-2 px-6">
                 <span className="text-xs font-medium text-gray-400">{group.label}</span>
                 <span className="text-xs text-gray-400">-{moneyFmt(group.dayTotal)}</span>
               </div>
@@ -485,7 +491,7 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
                 {group.transactions.map((t) => (
                   <div key={t.id}>
                     {editingId === t.id ? (
-                      <div ref={editFormRef} className="p-3 rounded-2xl space-y-2.5 mb-1 bg-gradient-to-br from-[#4169e1]/5 via-[#4169e1]/[0.03] to-transparent border border-[#4169e1]/10">
+                      <div ref={editFormRef} className="mx-3 p-3 rounded-2xl space-y-2.5 mb-1 bg-gradient-to-br from-[#4169e1]/5 via-[#4169e1]/[0.03] to-transparent border border-[#4169e1]/10">
                         <input
                           type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]*"
                           className="w-full h-11 px-3 bg-white rounded-lg text-sm outline-none"
@@ -546,7 +552,7 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
                           onMouseDown={() => startLongPress(t)}
                           onMouseUp={cancelLongPress}
                           onMouseLeave={cancelLongPress}
-                          className={`flex items-center justify-between min-h-[44px] py-2.5 border-b border-gray-50 last:border-0 rounded-lg transition-colors duration-150 cursor-pointer select-none touch-manipulation ${selectedIds.has(t.id) ? "bg-[#4169e1]/5" : heldId === t.id ? "bg-blue-200" : pressingId === t.id ? "bg-blue-50" : "active:bg-gray-50/50"}`}
+                          className={`flex items-center justify-between min-h-[44px] px-3 py-2.5 border-b border-gray-50 last:border-0 rounded-lg transition-colors duration-150 cursor-pointer select-none touch-manipulation ${selectedIds.has(t.id) ? "bg-[#4169e1]/5" : heldId === t.id ? "bg-blue-200" : pressingId === t.id ? "bg-blue-50" : "active:bg-gray-50/50"}`}
                         >
                           {selectionMode && (
                             <div className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 mr-3 ${
@@ -581,7 +587,7 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
                         </div>
 
                         {detailId === t.id && (
-                          <div className="px-3 py-3 mb-1 bg-gray-50 rounded-xl text-sm space-y-1.5">
+                          <div className="mx-3 px-3 py-3 mb-1 bg-gray-50 rounded-xl text-sm space-y-1.5">
                             <div className="flex justify-between">
                               <span className="text-gray-400">Date</span>
                               <span>{new Date(t.transaction_at).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
@@ -621,12 +627,14 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
       )}
 
       {hasMore && (
-        <button
-          className="w-full mt-6 py-3 text-sm font-medium text-[#4169e1] bg-[#4169e1]/5 rounded-xl active:bg-[#4169e1]/10 transition-colors"
-          onClick={() => void loadTransactions(false)} disabled={loading}
-        >
-          {loading ? "Loading..." : "Load more"}
-        </button>
+        <div className="px-6">
+          <button
+            className="w-full mt-6 py-3 text-sm font-medium text-[#4169e1] bg-[#4169e1]/5 rounded-xl active:bg-[#4169e1]/10 transition-colors"
+            onClick={() => void loadTransactions(false)} disabled={loading}
+          >
+            {loading ? "Loading..." : "Load more"}
+          </button>
+        </div>
       )}
       </div>
 
