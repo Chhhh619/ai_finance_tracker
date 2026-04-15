@@ -334,18 +334,6 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
         </div>
 
         <div className="flex items-center gap-2 relative" data-more-popover>
-          {selectionMode && (
-            <button
-              onClick={exitSelection}
-              aria-label="Cancel selection"
-              className="h-8 w-8 flex items-center justify-center rounded-xl bg-gray-50 text-gray-600 active:bg-gray-100 touch-manipulation"
-            >
-              <X size={14} />
-            </button>
-          )}
-          {selectionMode && selectedIds.size > 0 && (
-            <span className="text-xs text-gray-500">{selectedIds.size} selected</span>
-          )}
           {!selectionMode ? (
             <button
               onClick={() => setSelectionMode(true)}
@@ -821,6 +809,27 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
           </button>
         </div>
       </BottomSheet>
+
+      {selectionMode && (
+        <div
+          className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t border-gray-100 z-40"
+          style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 4px)" }}
+        >
+          <div className="flex items-center justify-between max-w-md mx-auto h-14 px-5">
+            <button
+              onClick={exitSelection}
+              aria-label="Cancel selection"
+              className="h-9 w-9 flex items-center justify-center rounded-xl bg-gray-100 text-gray-700 active:bg-gray-200 touch-manipulation"
+            >
+              <X size={18} />
+            </button>
+            <span className="text-sm font-medium text-gray-700">
+              {selectedIds.size} selected
+            </span>
+            <div className="w-9" />
+          </div>
+        </div>
+      )}
 
       <Toast message={toastMsg} onDone={() => setToastMsg(null)} />
     </div>
