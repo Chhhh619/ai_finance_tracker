@@ -25,9 +25,9 @@ export default function BottomSheet({ open, onClose, children }: Props) {
             className="fixed inset-0 bg-black/40 z-40" onClick={onClose}
           />
           <motion.div
-            initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+            initial={{ y: "100%", x: "-50%" }} animate={{ y: 0, x: "-50%" }} exit={{ y: "100%", x: "-50%" }}
             transition={{ type: "spring", damping: 28, stiffness: 300 }}
-            className="fixed inset-x-0 bottom-0 bg-white rounded-t-3xl z-50 max-w-md mx-auto"
+            className="fixed bottom-0 left-1/2 w-full max-w-md bg-white rounded-t-3xl z-50"
             style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 16px)" }}
           >
             <div className="px-6 pt-3 pb-4">
