@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { fetchTransactions, updateTransaction, deleteTransaction, type TransactionFilters } from "../lib/api";
-import { Search, CalendarDays, X, ChevronDown } from "lucide-react";
+import { Search, CalendarDays, X, ChevronDown, ChevronLeft, ChevronRight, Check, Download, FileSpreadsheet, FileText, Trash2 } from "lucide-react";
 import Calendar, { toKey } from "../components/Calendar";
 import CategoryPicker from "../components/CategoryPicker";
+import BottomSheet from "../components/BottomSheet";
+import Toast from "../components/Toast";
+import { exportTransactionsXLSX, exportTransactionsCSV, exportFilename } from "../lib/export";
 import type { Category, Transaction } from "../types";
 
 const moneyFmt = (n: number) =>
@@ -50,6 +53,14 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pressingId, setPressingId] = useState<string | null>(null);
   const [heldId, setHeldId] = useState<string | null>(null);
+
+  // Selection mode
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [exportSubOpen, setExportSubOpen] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   // Date filter
   const [showCalendar, setShowCalendar] = useState(false);
@@ -158,12 +169,14 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
   [transactions]);
 
   const handleTap = (t: Transaction) => {
+    if (selectionMode) { toggleSelected(t.id); return; }
     if (editingId === t.id) return;
     setDetailId(detailId === t.id ? null : t.id);
     setEditingId(null);
   };
 
   const startLongPress = (t: Transaction) => {
+    if (selectionMode) return;
     setPressingId(t.id);
     holdTimer.current = setTimeout(() => setHeldId(t.id), 200);
     longPressTimer.current = setTimeout(() => {
@@ -217,6 +230,63 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
     if (dateMode === "all") setDateMode("day");
   };
 
+  const toggleSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const exitSelection = () => {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+    setMoreOpen(false);
+    setExportSubOpen(false);
+  };
+
+  const selectedTransactions = useMemo(
+    () => transactions.filter((t) => selectedIds.has(t.id)),
+    [transactions, selectedIds]
+  );
+
+  const handleExport = (kind: "xlsx" | "csv") => {
+    const filename = exportFilename(kind);
+    const count = selectedTransactions.length;
+    if (kind === "xlsx") exportTransactionsXLSX(selectedTransactions, filename);
+    else exportTransactionsCSV(selectedTransactions, filename);
+    setToastMsg(`Exported ${count} transactions`);
+    exitSelection();
+  };
+
+  const handleConfirmDelete = async () => {
+    const ids = Array.from(selectedIds);
+    const total = ids.length;
+    setShowDeleteConfirm(false);
+    const results = await Promise.allSettled(ids.map((id) => deleteTransaction(id)));
+    const ok: string[] = [];
+    results.forEach((r, i) => { if (r.status === "fulfilled") ok.push(ids[i]); });
+    const okSet = new Set(ok);
+    setTransactions((prev) => prev.filter((t) => !okSet.has(t.id)));
+    const failed = total - ok.length;
+    setToastMsg(failed === 0 ? `Deleted ${total} transactions` : `Deleted ${ok.length} of ${total} — ${failed} failed`);
+    exitSelection();
+  };
+
+  // Close More popover on outside pointerdown
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onPointer = (e: PointerEvent) => {
+      const target = e.target as Element | null;
+      if (target && !target.closest("[data-more-popover]")) {
+        setMoreOpen(false);
+        setExportSubOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointer);
+    return () => document.removeEventListener("pointerdown", onPointer);
+  }, [moreOpen]);
+
   // Group transactions by date
   const grouped = (() => {
     const groups = new Map<string, Transaction[]>();
@@ -249,18 +319,102 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
       </div>
 
       {/* Date mode pills */}
-      <div className="flex gap-2 mb-4">
-        {(["all", "day", "week", "month"] as const).map((m) => (
-          <button
-            key={m}
-            onClick={() => setDateMode(m)}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all touch-manipulation ${
-              dateMode === m ? "bg-[#4169e1] text-white" : "bg-gray-50 text-gray-500 active:bg-gray-100"
-            }`}
-          >
-            {m === "all" ? "All" : m === "day" ? "Day" : m === "week" ? "Week" : "Month"}
-          </button>
-        ))}
+      <div className="flex items-center justify-between gap-2 mb-4">
+        <div className="flex gap-2">
+          {(["all", "day", "week", "month"] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => setDateMode(m)}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all touch-manipulation ${
+                dateMode === m ? "bg-[#4169e1] text-white" : "bg-gray-50 text-gray-500 active:bg-gray-100"
+              }`}
+            >
+              {m === "all" ? "All" : m === "day" ? "Day" : m === "week" ? "Week" : "Month"}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2 relative" data-more-popover>
+          {selectionMode && (
+            <button
+              onClick={exitSelection}
+              aria-label="Cancel selection"
+              className="h-8 w-8 flex items-center justify-center rounded-xl bg-gray-50 text-gray-600 active:bg-gray-100 touch-manipulation"
+            >
+              <X size={14} />
+            </button>
+          )}
+          {selectionMode && selectedIds.size > 0 && (
+            <span className="text-xs text-gray-500">{selectedIds.size} selected</span>
+          )}
+          {!selectionMode ? (
+            <button
+              onClick={() => setSelectionMode(true)}
+              className="h-8 px-3 rounded-xl text-xs font-medium bg-gray-50 text-gray-600 active:bg-gray-100 transition-colors touch-manipulation"
+            >
+              Select
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={() => { if (selectedIds.size > 0) setMoreOpen((v) => !v); }}
+                disabled={selectedIds.size === 0}
+                className={`h-8 px-3 rounded-xl text-xs font-medium flex items-center gap-1 transition-colors touch-manipulation ${
+                  selectedIds.size === 0
+                    ? "bg-[#4169e1]/40 text-white cursor-not-allowed"
+                    : "bg-[#4169e1] text-white active:bg-[#3151c1]"
+                }`}
+              >
+                More <ChevronDown size={12} />
+              </button>
+              {moreOpen && (
+                <div className="absolute right-0 top-full mt-2 w-44 rounded-xl bg-white shadow-lg border border-gray-100 z-50 overflow-hidden">
+                  {!exportSubOpen ? (
+                    <>
+                      <button
+                        onClick={() => setExportSubOpen(true)}
+                        className="w-full flex items-center justify-between px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100"
+                      >
+                        <span className="flex items-center gap-2.5"><Download size={16} className="text-gray-500" />Export</span>
+                        <ChevronRight size={14} className="text-gray-400" />
+                      </button>
+                      <button
+                        onClick={() => { setMoreOpen(false); setShowDeleteConfirm(true); }}
+                        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-red-500 hover:bg-red-50 active:bg-red-100 border-t border-gray-50"
+                      >
+                        <Trash2 size={16} />
+                        Delete
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => setExportSubOpen(false)}
+                        className="w-full flex items-center gap-2 px-3.5 py-2 text-xs text-gray-500 hover:bg-gray-50 border-b border-gray-50"
+                      >
+                        <ChevronLeft size={14} /> Back
+                      </button>
+                      <button
+                        onClick={() => { handleExport("xlsx"); setMoreOpen(false); setExportSubOpen(false); }}
+                        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100"
+                      >
+                        <FileSpreadsheet size={16} className="text-gray-500" />
+                        Export as XLSX
+                      </button>
+                      <button
+                        onClick={() => { handleExport("csv"); setMoreOpen(false); setExportSubOpen(false); }}
+                        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100 border-t border-gray-50"
+                      >
+                        <FileText size={16} className="text-gray-500" />
+                        Export as CSV
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       {/* Period total */}
@@ -405,8 +559,15 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
                           onMouseDown={() => startLongPress(t)}
                           onMouseUp={cancelLongPress}
                           onMouseLeave={cancelLongPress}
-                          className={`flex items-center justify-between min-h-[44px] py-2.5 border-b border-gray-50 last:border-0 rounded-lg transition-colors duration-150 cursor-pointer select-none touch-manipulation ${heldId === t.id ? "bg-blue-200" : pressingId === t.id ? "bg-blue-50" : "active:bg-gray-50/50"}`}
+                          className={`flex items-center justify-between min-h-[44px] py-2.5 border-b border-gray-50 last:border-0 rounded-lg transition-colors duration-150 cursor-pointer select-none touch-manipulation ${selectedIds.has(t.id) ? "bg-[#4169e1]/5" : heldId === t.id ? "bg-blue-200" : pressingId === t.id ? "bg-blue-50" : "active:bg-gray-50/50"}`}
                         >
+                          {selectionMode && (
+                            <div className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 mr-3 ${
+                              selectedIds.has(t.id) ? "bg-[#4169e1] border-[#4169e1]" : "border-gray-300 bg-white"
+                            }`}>
+                              {selectedIds.has(t.id) && <Check size={14} className="text-white" />}
+                            </div>
+                          )}
                           <div className="flex items-center gap-3 min-w-0 flex-1">
                             <div
                               className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 text-white text-xs font-bold"
@@ -715,6 +876,27 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
           </>
         )}
       </AnimatePresence>
+
+      <BottomSheet open={showDeleteConfirm} onClose={() => setShowDeleteConfirm(false)}>
+        <h2 className="text-lg font-semibold mb-1">Delete {selectedIds.size} transactions?</h2>
+        <p className="text-sm text-gray-500 mb-4">This cannot be undone.</p>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowDeleteConfirm(false)}
+            className="flex-1 h-11 rounded-xl bg-gray-100 text-gray-700 text-sm font-medium active:bg-gray-200 touch-manipulation"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => void handleConfirmDelete()}
+            className="flex-1 h-11 rounded-xl bg-red-500 text-white text-sm font-medium active:bg-red-600 touch-manipulation"
+          >
+            Delete
+          </button>
+        </div>
+      </BottomSheet>
+
+      <Toast message={toastMsg} onDone={() => setToastMsg(null)} />
     </div>
   );
 }
