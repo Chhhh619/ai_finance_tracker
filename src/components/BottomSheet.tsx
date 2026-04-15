@@ -25,14 +25,18 @@ export default function BottomSheet({ open, onClose, children }: Props) {
             className="fixed inset-0 bg-black/40 z-40" onClick={onClose}
           />
           <motion.div
-            initial={{ y: "100%", x: "-50%" }} animate={{ y: 0, x: "-50%" }} exit={{ y: "100%", x: "-50%" }}
+            initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
             transition={{ type: "spring", damping: 28, stiffness: 300 }}
-            className="fixed bottom-0 left-1/2 w-full max-w-md bg-white rounded-t-3xl z-50"
-            style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 16px)" }}
+            className="fixed bottom-0 left-0 right-0 z-50 flex justify-center pointer-events-none"
           >
-            <div className="px-6 pt-3 pb-4">
-              <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-4" />
-              {children}
+            <div
+              className="bg-white rounded-t-3xl w-full max-w-md pointer-events-auto overflow-hidden"
+              style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 16px)" }}
+            >
+              <div className="px-6 pt-3 pb-4">
+                <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-4" />
+                {children}
+              </div>
             </div>
           </motion.div>
         </>
