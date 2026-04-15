@@ -473,17 +473,17 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
       </div>
 
       </div>
-      <div className="pt-3">
+      <div className="pt-3 px-3">
       {/* Transaction list */}
       {grouped.length === 0 && !loading ? (
-        <p className="text-gray-400 text-sm py-12 text-center px-6">
+        <p className="text-gray-400 text-sm py-12 text-center px-3">
           {dateMode !== "all" ? `No transactions for ${dateRange.label}.` : "No transactions found."}
         </p>
       ) : (
         <div className="space-y-6">
           {grouped.map((group) => (
             <div key={group.date}>
-              <div className="flex items-center justify-between mb-2 px-6">
+              <div className="flex items-center justify-between mb-2 px-3">
                 <span className="text-xs font-medium text-gray-400">{group.label}</span>
                 <span className="text-xs text-gray-400">-{moneyFmt(group.dayTotal)}</span>
               </div>
@@ -627,7 +627,7 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
       )}
 
       {hasMore && (
-        <div className="px-6">
+        <div className="px-3">
           <button
             className="w-full mt-6 py-3 text-sm font-medium text-[#4169e1] bg-[#4169e1]/5 rounded-xl active:bg-[#4169e1]/10 transition-colors"
             onClick={() => void loadTransactions(false)} disabled={loading}
