@@ -4,8 +4,9 @@ import { fetchSettings, updateSettings, fetchTransactions } from "../lib/api";
 import { signOut, registerPasskey } from "../lib/auth";
 import { supabase } from "../lib/supabase";
 import { getQueue, flushQueue } from "../lib/offline-queue";
-import { LogOut, Fingerprint, Download, RefreshCw, ChevronRight, Copy, Check } from "lucide-react";
-import * as XLSX from "xlsx";
+import { LogOut, Fingerprint, Download, RefreshCw, ChevronRight, Copy, Check, FileSpreadsheet, FileText } from "lucide-react";
+import BottomSheet from "../components/BottomSheet";
+import { exportTransactionsXLSX, exportTransactionsCSV, exportFilename } from "../lib/export";
 import type { DuplicateHandling, UserSettings } from "../types";
 
 const duplicateOptions: { value: DuplicateHandling; label: string; desc: string }[] = [
@@ -21,6 +22,7 @@ export default function SettingsPage() {
   const [queueCount, setQueueCount] = useState(0);
   const [copied, setCopied] = useState(false);
   const [showDupPicker, setShowDupPicker] = useState(false);
+  const [showExportPicker, setShowExportPicker] = useState(false);
 
   useEffect(() => {
     void fetchSettings().then(setSettings);
@@ -41,21 +43,13 @@ export default function SettingsPage() {
     setStatus(error ?? "Face ID enabled!");
   };
 
-  const handleExportXLSX = async () => {
+  const handleExport = async (kind: "xlsx" | "csv") => {
     setStatus("Exporting...");
     try {
       const txns = await fetchTransactions({ limit: 10000 });
-      const rows = txns.map((t) => {
-        const d = new Date(t.transaction_at);
-        const pad = (n: number) => String(n).padStart(2, "0");
-        const date = `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${String(d.getFullYear()).slice(-2)}`;
-        const time = `${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
-        return { Date: date, Time: time, Merchant: t.merchant, Amount: Number(t.amount), Direction: t.direction, Category: t.category?.name ?? "", Source: t.source };
-      });
-      const ws = XLSX.utils.json_to_sheet(rows);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Transactions");
-      XLSX.writeFile(wb, `pocketringgit-${new Date().toISOString().slice(0, 10)}.xlsx`);
+      const filename = exportFilename(kind);
+      if (kind === "xlsx") exportTransactionsXLSX(txns, filename);
+      else exportTransactionsCSV(txns, filename);
       setStatus("Exported!");
     } catch { setStatus("Export failed."); }
   };
@@ -196,11 +190,11 @@ export default function SettingsPage() {
       <section className="mb-6">
         <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Data</h2>
         <button
-          onClick={() => void handleExportXLSX()}
+          onClick={() => setShowExportPicker(true)}
           className="flex items-center gap-3 px-4 py-3.5 bg-gray-50 rounded-2xl w-full active:bg-gray-100 transition-colors"
         >
           <Download size={18} className="text-gray-500" />
-          <span className="text-[15px]">Export as XLSX</span>
+          <span className="text-[15px]">Export Transactions</span>
         </button>
       </section>
 
@@ -249,6 +243,32 @@ export default function SettingsPage() {
           </>
         )}
       </AnimatePresence>
+
+      <BottomSheet open={showExportPicker} onClose={() => setShowExportPicker(false)}>
+        <h2 className="text-lg font-semibold mb-4">Export Transactions</h2>
+        <div className="space-y-2">
+          <button
+            onClick={() => { setShowExportPicker(false); void handleExport("xlsx"); }}
+            className="w-full flex items-center gap-3 p-4 rounded-2xl bg-gray-50 active:bg-gray-100 transition-colors text-left"
+          >
+            <FileSpreadsheet size={18} className="text-gray-500" />
+            <div>
+              <div className="font-medium text-[15px]">Export as XLSX</div>
+              <div className="text-xs text-gray-500">Excel spreadsheet</div>
+            </div>
+          </button>
+          <button
+            onClick={() => { setShowExportPicker(false); void handleExport("csv"); }}
+            className="w-full flex items-center gap-3 p-4 rounded-2xl bg-gray-50 active:bg-gray-100 transition-colors text-left"
+          >
+            <FileText size={18} className="text-gray-500" />
+            <div>
+              <div className="font-medium text-[15px]">Export as CSV</div>
+              <div className="text-xs text-gray-500">Comma-separated values</div>
+            </div>
+          </button>
+        </div>
+      </BottomSheet>
     </div>
   );
 }
