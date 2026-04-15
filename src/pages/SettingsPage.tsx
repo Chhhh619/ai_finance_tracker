@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
 import { fetchSettings, updateSettings, fetchTransactions } from "../lib/api";
 import { signOut, registerPasskey } from "../lib/auth";
 import { supabase } from "../lib/supabase";
@@ -201,48 +200,30 @@ export default function SettingsPage() {
       {status && <p className="text-sm text-center text-gray-500 mt-2">{status}</p>}
 
       {/* Duplicate Handling Picker */}
-      <AnimatePresence>
-        {showDupPicker && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowDupPicker(false)}
-            />
-            <motion.div
-              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 28, stiffness: 300 }}
-              className="fixed inset-x-0 bottom-0 bg-white rounded-t-3xl z-50 max-w-md mx-auto"
-              style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 16px)" }}
+      <BottomSheet open={showDupPicker} onClose={() => setShowDupPicker(false)}>
+        <h2 className="text-lg font-semibold mb-4">Duplicate Handling</h2>
+        <div className="space-y-2 min-w-[45vw] max-w-full">
+          {duplicateOptions.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => {
+                void handleDuplicateChange(opt.value);
+                setShowDupPicker(false);
+              }}
+              className={`w-full px-5 py-3.5 rounded-2xl text-left transition-all touch-manipulation ${
+                settings.duplicate_handling === opt.value
+                  ? "bg-[#4169e1] text-white"
+                  : "bg-gray-50 text-gray-700 active:bg-gray-100"
+              }`}
             >
-              <div className="px-6 pt-5 pb-4">
-                <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-5" />
-                <h2 className="text-lg font-semibold mb-4">Duplicate Handling</h2>
-                <div className="space-y-2 min-w-[45vw] max-w-full">
-                  {duplicateOptions.map((opt) => (
-                    <button
-                      key={opt.value}
-                      onClick={() => {
-                        void handleDuplicateChange(opt.value);
-                        setShowDupPicker(false);
-                      }}
-                      className={`w-full px-5 py-3.5 rounded-2xl text-left transition-all touch-manipulation ${
-                        settings.duplicate_handling === opt.value
-                          ? "bg-[#4169e1] text-white"
-                          : "bg-gray-50 text-gray-700 active:bg-gray-100"
-                      }`}
-                    >
-                      <div className="font-medium text-[15px]">{opt.label}</div>
-                      <div className={`text-xs mt-0.5 ${
-                        settings.duplicate_handling === opt.value ? "text-white/70" : "text-gray-400"
-                      }`}>{opt.desc}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+              <div className="font-medium text-[15px]">{opt.label}</div>
+              <div className={`text-xs mt-0.5 ${
+                settings.duplicate_handling === opt.value ? "text-white/70" : "text-gray-400"
+              }`}>{opt.desc}</div>
+            </button>
+          ))}
+        </div>
+      </BottomSheet>
 
       <BottomSheet open={showExportPicker} onClose={() => setShowExportPicker(false)}>
         <h2 className="text-lg font-semibold mb-4">Export Transactions</h2>
