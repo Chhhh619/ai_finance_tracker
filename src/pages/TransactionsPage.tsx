@@ -18,7 +18,8 @@ const relativeDate = (iso: string) => {
   if (diff === 0) return "Today";
   if (diff === 1) return "Yesterday";
   if (diff < 7) return d.toLocaleDateString("en-MY", { weekday: "long" });
-  return d.toLocaleDateString("en-MY", { day: "numeric", month: "short" });
+  const sameYear = d.getFullYear() === now.getFullYear();
+  return d.toLocaleDateString("en-MY", sameYear ? { day: "numeric", month: "short" } : { day: "numeric", month: "short", year: "numeric" });
 };
 
 type DateFilterMode = "all" | "day" | "week" | "month";
@@ -39,10 +40,16 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
   const [editAmount, setEditAmount] = useState("");
   const [editMerchant, setEditMerchant] = useState("");
   const [editCategory, setEditCategory] = useState("");
+  const [editDate, setEditDate] = useState<Date>(new Date());
   const [showCatPicker, setShowCatPicker] = useState(false);
+  const [showEditDatePicker, setShowEditDatePicker] = useState(false);
+  const editFormRef = useRef<HTMLDivElement | null>(null);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pressingId, setPressingId] = useState<string | null>(null);
+  const [heldId, setHeldId] = useState<string | null>(null);
 
   // Date filter
   const [showCalendar, setShowCalendar] = useState(false);
@@ -116,6 +123,27 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, filterSource, filterCategory, showReviewOnly, dateRange]);
 
+  // Close edit view on outside click or Esc
+  useEffect(() => {
+    if (!editingId) return;
+    const handlePointer = (e: PointerEvent) => {
+      if (showEditDatePicker || showCatPicker) return;
+      const target = e.target as Node | null;
+      if (editFormRef.current && target && !editFormRef.current.contains(target)) {
+        setEditingId(null);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setEditingId(null);
+    };
+    document.addEventListener("pointerdown", handlePointer);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointer);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [editingId, showEditDatePicker, showCatPicker]);
+
   // Build set of dates with transactions for calendar dots
   const activeDates = useMemo(() => {
     const set = new Set<string>();
@@ -136,12 +164,17 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
   };
 
   const startLongPress = (t: Transaction) => {
+    setPressingId(t.id);
+    holdTimer.current = setTimeout(() => setHeldId(t.id), 200);
     longPressTimer.current = setTimeout(() => {
       setEditingId(t.id);
       setDetailId(null);
       setEditAmount(String(t.amount));
       setEditMerchant(t.merchant);
       setEditCategory(t.category_id ?? "");
+      setEditDate(new Date(t.transaction_at));
+      setPressingId(null);
+      setHeldId(null);
     }, 500);
   };
 
@@ -150,6 +183,12 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
       clearTimeout(longPressTimer.current);
       longPressTimer.current = null;
     }
+    if (holdTimer.current) {
+      clearTimeout(holdTimer.current);
+      holdTimer.current = null;
+    }
+    setPressingId(null);
+    setHeldId(null);
   };
 
   const handleSaveEdit = async (id: string) => {
@@ -160,6 +199,7 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
       merchant: editMerchant.trim(),
       category_id: editCategory || undefined,
       needs_review: false,
+      transaction_at: editDate.toISOString(),
     });
     setTransactions((prev) => prev.map((t) => (t.id === id ? updated : t)));
     setEditingId(null);
@@ -195,7 +235,8 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
   })();
 
   return (
-    <div className="px-6 pt-4 pb-6">
+    <div className="pb-6">
+      <div className="sticky top-0 z-30 bg-white px-6 pt-4 pb-3">
       <div className="flex items-center justify-between mb-5">
         <h1 className="text-2xl font-semibold">Transactions</h1>
         <button
@@ -284,6 +325,8 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
         </button>
       </div>
 
+      </div>
+      <div className="px-6 pt-3">
       {/* Transaction list */}
       {grouped.length === 0 && !loading ? (
         <p className="text-gray-400 text-sm py-12 text-center">
@@ -301,7 +344,7 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
                 {group.transactions.map((t) => (
                   <div key={t.id}>
                     {editingId === t.id ? (
-                      <div className="p-3 rounded-2xl space-y-2.5 mb-1 bg-gradient-to-br from-[#4169e1]/5 via-[#4169e1]/[0.03] to-transparent border border-[#4169e1]/10">
+                      <div ref={editFormRef} className="p-3 rounded-2xl space-y-2.5 mb-1 bg-gradient-to-br from-[#4169e1]/5 via-[#4169e1]/[0.03] to-transparent border border-[#4169e1]/10">
                         <input
                           type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]*"
                           className="w-full h-11 px-3 bg-white rounded-lg text-sm outline-none"
@@ -330,10 +373,11 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
                         </button>
                         <div className="flex gap-2">
                           <button
-                            onPointerUp={() => setEditingId(null)}
-                            className="flex-1 h-11 bg-white rounded-lg text-sm font-medium active:bg-gray-100 transition-colors select-none touch-manipulation"
+                            onClick={() => setShowEditDatePicker(true)}
+                            className="flex-1 h-11 px-3 bg-white rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 active:bg-gray-100 transition-colors select-none touch-manipulation"
                           >
-                            Cancel
+                            <CalendarDays size={14} className="text-gray-500" />
+                            <span className="truncate">{editDate.toLocaleDateString("en-MY", { day: "numeric", month: "short" })}, {editDate.toLocaleTimeString("en-MY", { hour: "2-digit", minute: "2-digit" })}</span>
                           </button>
                           <button
                             onPointerUp={() => void handleSaveEdit(t.id)}
@@ -361,7 +405,7 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
                           onMouseDown={() => startLongPress(t)}
                           onMouseUp={cancelLongPress}
                           onMouseLeave={cancelLongPress}
-                          className="flex items-center justify-between min-h-[44px] py-2.5 border-b border-gray-50 last:border-0 active:bg-gray-50/50 rounded-lg transition-colors cursor-pointer select-none touch-manipulation"
+                          className={`flex items-center justify-between min-h-[44px] py-2.5 border-b border-gray-50 last:border-0 rounded-lg transition-colors duration-150 cursor-pointer select-none touch-manipulation ${heldId === t.id ? "bg-blue-200" : pressingId === t.id ? "bg-blue-50" : "active:bg-gray-50/50"}`}
                         >
                           <div className="flex items-center gap-3 min-w-0 flex-1">
                             <div
@@ -416,7 +460,6 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
                                 <span>{Math.round(t.confidence * 100)}%</span>
                               </div>
                             )}
-                            <p className="text-xs text-gray-400 pt-1">Long press to edit</p>
                           </div>
                         )}
                       </div>
@@ -437,6 +480,7 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
           {loading ? "Loading..." : "Load more"}
         </button>
       )}
+      </div>
 
       {/* Calendar bottom sheet */}
       <AnimatePresence>
@@ -498,6 +542,79 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
         selected={editCategory}
         onSelect={setEditCategory}
       />
+
+      {/* Edit Date/Time Picker */}
+      <AnimatePresence>
+        {showEditDatePicker && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowEditDatePicker(false)}
+            />
+            <motion.div
+              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 28, stiffness: 300 }}
+              className="fixed inset-x-0 bottom-0 bg-white rounded-t-3xl z-50 max-w-md mx-auto"
+              style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 16px)" }}
+            >
+              <div className="p-5">
+                <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-4" />
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold">Date & Time</h2>
+                  <button onClick={() => setShowEditDatePicker(false)} className="p-1.5 hover:bg-gray-100 rounded-full">
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <Calendar
+                  selected={editDate}
+                  onSelect={(d) => {
+                    const next = new Date(editDate);
+                    next.setFullYear(d.getFullYear(), d.getMonth(), d.getDate());
+                    setEditDate(next);
+                  }}
+                />
+
+                <div className="mt-4 flex items-center justify-between gap-3 px-1">
+                  <span className="text-sm font-medium text-gray-600">Time</span>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number" min={0} max={23} inputMode="numeric"
+                      value={String(editDate.getHours()).padStart(2, "0")}
+                      onChange={(e) => {
+                        const h = Math.max(0, Math.min(23, parseInt(e.target.value || "0", 10)));
+                        const next = new Date(editDate);
+                        next.setHours(h);
+                        setEditDate(next);
+                      }}
+                      className="w-14 h-11 text-center bg-gray-50 rounded-lg text-base font-semibold outline-none focus:ring-2 focus:ring-[#4169e1]/20"
+                    />
+                    <span className="text-base font-semibold text-gray-400">:</span>
+                    <input
+                      type="number" min={0} max={59} inputMode="numeric"
+                      value={String(editDate.getMinutes()).padStart(2, "0")}
+                      onChange={(e) => {
+                        const m = Math.max(0, Math.min(59, parseInt(e.target.value || "0", 10)));
+                        const next = new Date(editDate);
+                        next.setMinutes(m);
+                        setEditDate(next);
+                      }}
+                      className="w-14 h-11 text-center bg-gray-50 rounded-lg text-base font-semibold outline-none focus:ring-2 focus:ring-[#4169e1]/20"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setShowEditDatePicker(false)}
+                  className="w-full mt-4 h-11 bg-[#4169e1] text-white rounded-xl text-sm font-medium active:bg-[#3151c1] transition-colors touch-manipulation"
+                >
+                  Done
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* Source Filter Picker */}
       <AnimatePresence>
