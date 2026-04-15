@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
 import { fetchTransactions, updateTransaction, deleteTransaction, type TransactionFilters } from "../lib/api";
 import { Search, CalendarDays, X, ChevronDown, ChevronLeft, ChevronRight, Check, Download, FileSpreadsheet, FileText, Trash2 } from "lucide-react";
 import Calendar, { toKey } from "../components/Calendar";
@@ -644,56 +643,37 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
       </div>
 
       {/* Calendar bottom sheet */}
-      <AnimatePresence>
-        {showCalendar && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowCalendar(false)}
-            />
-            <motion.div
-              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 28, stiffness: 300 }}
-              className="fixed inset-x-0 bottom-0 bg-white rounded-t-3xl z-50 max-w-md mx-auto"
-              style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 16px)" }}
+      <BottomSheet open={showCalendar} onClose={() => setShowCalendar(false)}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Select Date</h2>
+          <button onClick={() => setShowCalendar(false)} className="p-1.5 hover:bg-gray-100 rounded-full">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="flex gap-2 mb-4">
+          {(["day", "week", "month"] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => setDateMode(m)}
+              className={`flex-1 py-2 rounded-xl text-sm font-medium transition-all ${
+                dateMode === m ? "bg-[#4169e1] text-white" : "bg-gray-100 text-gray-600"
+              }`}
             >
-              <div className="p-5">
-                <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-4" />
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold">Select Date</h2>
-                  <button onClick={() => setShowCalendar(false)} className="p-1.5 hover:bg-gray-100 rounded-full">
-                    <X size={18} />
-                  </button>
-                </div>
+              {m === "day" ? "Day" : m === "week" ? "Week" : "Month"}
+            </button>
+          ))}
+        </div>
 
-                {/* Filter mode pills inside calendar */}
-                <div className="flex gap-2 mb-4">
-                  {(["day", "week", "month"] as const).map((m) => (
-                    <button
-                      key={m}
-                      onClick={() => setDateMode(m)}
-                      className={`flex-1 py-2 rounded-xl text-sm font-medium transition-all ${
-                        dateMode === m ? "bg-[#4169e1] text-white" : "bg-gray-100 text-gray-600"
-                      }`}
-                    >
-                      {m === "day" ? "Day" : m === "week" ? "Week" : "Month"}
-                    </button>
-                  ))}
-                </div>
-
-                <Calendar
-                  selected={selectedDate}
-                  onSelect={(d) => {
-                    handleDateSelect(d);
-                    setShowCalendar(false);
-                  }}
-                  activeDates={activeDates}
-                />
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+        <Calendar
+          selected={selectedDate}
+          onSelect={(d) => {
+            handleDateSelect(d);
+            setShowCalendar(false);
+          }}
+          activeDates={activeDates}
+        />
+      </BottomSheet>
 
       {/* Category Picker */}
       <CategoryPicker
@@ -705,177 +685,123 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
       />
 
       {/* Edit Date/Time Picker */}
-      <AnimatePresence>
-        {showEditDatePicker && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowEditDatePicker(false)}
+      <BottomSheet open={showEditDatePicker} onClose={() => setShowEditDatePicker(false)}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Date & Time</h2>
+          <button onClick={() => setShowEditDatePicker(false)} className="p-1.5 hover:bg-gray-100 rounded-full">
+            <X size={18} />
+          </button>
+        </div>
+
+        <Calendar
+          selected={editDate}
+          onSelect={(d) => {
+            const next = new Date(editDate);
+            next.setFullYear(d.getFullYear(), d.getMonth(), d.getDate());
+            setEditDate(next);
+          }}
+        />
+
+        <div className="mt-4 flex items-center justify-between gap-3 px-1">
+          <span className="text-sm font-medium text-gray-600">Time</span>
+          <div className="flex items-center gap-2">
+            <input
+              type="number" min={0} max={23} inputMode="numeric"
+              value={String(editDate.getHours()).padStart(2, "0")}
+              onChange={(e) => {
+                const h = Math.max(0, Math.min(23, parseInt(e.target.value || "0", 10)));
+                const next = new Date(editDate);
+                next.setHours(h);
+                setEditDate(next);
+              }}
+              className="w-14 h-11 text-center bg-gray-50 rounded-lg text-base font-semibold outline-none focus:ring-2 focus:ring-[#4169e1]/20"
             />
-            <motion.div
-              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 28, stiffness: 300 }}
-              className="fixed inset-x-0 bottom-0 bg-white rounded-t-3xl z-50 max-w-md mx-auto"
-              style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 16px)" }}
-            >
-              <div className="p-5">
-                <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-4" />
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold">Date & Time</h2>
-                  <button onClick={() => setShowEditDatePicker(false)} className="p-1.5 hover:bg-gray-100 rounded-full">
-                    <X size={18} />
-                  </button>
-                </div>
+            <span className="text-base font-semibold text-gray-400">:</span>
+            <input
+              type="number" min={0} max={59} inputMode="numeric"
+              value={String(editDate.getMinutes()).padStart(2, "0")}
+              onChange={(e) => {
+                const m = Math.max(0, Math.min(59, parseInt(e.target.value || "0", 10)));
+                const next = new Date(editDate);
+                next.setMinutes(m);
+                setEditDate(next);
+              }}
+              className="w-14 h-11 text-center bg-gray-50 rounded-lg text-base font-semibold outline-none focus:ring-2 focus:ring-[#4169e1]/20"
+            />
+          </div>
+        </div>
 
-                <Calendar
-                  selected={editDate}
-                  onSelect={(d) => {
-                    const next = new Date(editDate);
-                    next.setFullYear(d.getFullYear(), d.getMonth(), d.getDate());
-                    setEditDate(next);
-                  }}
-                />
-
-                <div className="mt-4 flex items-center justify-between gap-3 px-1">
-                  <span className="text-sm font-medium text-gray-600">Time</span>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number" min={0} max={23} inputMode="numeric"
-                      value={String(editDate.getHours()).padStart(2, "0")}
-                      onChange={(e) => {
-                        const h = Math.max(0, Math.min(23, parseInt(e.target.value || "0", 10)));
-                        const next = new Date(editDate);
-                        next.setHours(h);
-                        setEditDate(next);
-                      }}
-                      className="w-14 h-11 text-center bg-gray-50 rounded-lg text-base font-semibold outline-none focus:ring-2 focus:ring-[#4169e1]/20"
-                    />
-                    <span className="text-base font-semibold text-gray-400">:</span>
-                    <input
-                      type="number" min={0} max={59} inputMode="numeric"
-                      value={String(editDate.getMinutes()).padStart(2, "0")}
-                      onChange={(e) => {
-                        const m = Math.max(0, Math.min(59, parseInt(e.target.value || "0", 10)));
-                        const next = new Date(editDate);
-                        next.setMinutes(m);
-                        setEditDate(next);
-                      }}
-                      className="w-14 h-11 text-center bg-gray-50 rounded-lg text-base font-semibold outline-none focus:ring-2 focus:ring-[#4169e1]/20"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => setShowEditDatePicker(false)}
-                  className="w-full mt-4 h-11 bg-[#4169e1] text-white rounded-xl text-sm font-medium active:bg-[#3151c1] transition-colors touch-manipulation"
-                >
-                  Done
-                </button>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+        <button
+          onClick={() => setShowEditDatePicker(false)}
+          className="w-full mt-4 h-11 bg-[#4169e1] text-white rounded-xl text-sm font-medium active:bg-[#3151c1] transition-colors touch-manipulation"
+        >
+          Done
+        </button>
+      </BottomSheet>
 
       {/* Source Filter Picker */}
-      <AnimatePresence>
-        {showSourcePicker && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowSourcePicker(false)}
-            />
-            <motion.div
-              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 28, stiffness: 300 }}
-              className="fixed inset-x-0 bottom-0 bg-white rounded-t-3xl z-50 max-w-md mx-auto"
-              style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 16px)" }}
+      <BottomSheet open={showSourcePicker} onClose={() => setShowSourcePicker(false)}>
+        <h2 className="text-lg font-semibold mb-4">Source</h2>
+        <div className="space-y-2">
+          {[
+            { value: "", label: "All sources" },
+            { value: "ewallet", label: "E-wallet" },
+            { value: "bank", label: "Bank" },
+            { value: "manual", label: "Manual" },
+            { value: "receipt", label: "Receipt" },
+          ].map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => { setFilterSource(opt.value); setShowSourcePicker(false); }}
+              className={`w-full py-3.5 px-4 rounded-2xl text-left text-[15px] font-medium transition-all touch-manipulation ${
+                filterSource === opt.value
+                  ? "bg-[#4169e1] text-white"
+                  : "bg-gray-50 text-gray-700 active:bg-gray-100"
+              }`}
             >
-              <div className="px-6 pt-5 pb-4">
-                <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-5" />
-                <h2 className="text-lg font-semibold mb-4">Source</h2>
-                <div className="space-y-2">
-                  {[
-                    { value: "", label: "All sources" },
-                    { value: "ewallet", label: "E-wallet" },
-                    { value: "bank", label: "Bank" },
-                    { value: "manual", label: "Manual" },
-                    { value: "receipt", label: "Receipt" },
-                  ].map((opt) => (
-                    <button
-                      key={opt.value}
-                      onClick={() => { setFilterSource(opt.value); setShowSourcePicker(false); }}
-                      className={`w-full py-3.5 px-4 rounded-2xl text-left text-[15px] font-medium transition-all touch-manipulation ${
-                        filterSource === opt.value
-                          ? "bg-[#4169e1] text-white"
-                          : "bg-gray-50 text-gray-700 active:bg-gray-100"
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </BottomSheet>
 
       {/* Category Filter Picker */}
-      <AnimatePresence>
-        {showCategoryFilter && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowCategoryFilter(false)}
-            />
-            <motion.div
-              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 28, stiffness: 300 }}
-              className="fixed inset-x-0 bottom-0 bg-white rounded-t-3xl z-50 max-w-md mx-auto"
-              style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 16px)" }}
+      <BottomSheet open={showCategoryFilter} onClose={() => setShowCategoryFilter(false)}>
+        <h2 className="text-lg font-semibold mb-4">Category</h2>
+        <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+          <button
+            onClick={() => { setFilterCategory(""); setShowCategoryFilter(false); }}
+            className={`w-full py-3.5 px-4 rounded-2xl text-left text-[15px] font-medium transition-all touch-manipulation ${
+              !filterCategory
+                ? "bg-[#4169e1] text-white"
+                : "bg-gray-50 text-gray-700 active:bg-gray-100"
+            }`}
+          >
+            All categories
+          </button>
+          {categories.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => { setFilterCategory(c.id); setShowCategoryFilter(false); }}
+              className={`w-full py-3.5 px-4 rounded-2xl text-left text-[15px] font-medium flex items-center gap-3 transition-all touch-manipulation ${
+                filterCategory === c.id
+                  ? "bg-[#4169e1] text-white"
+                  : "bg-gray-50 text-gray-700 active:bg-gray-100"
+              }`}
             >
-              <div className="px-6 pt-5 pb-4">
-                <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-5" />
-                <h2 className="text-lg font-semibold mb-4">Category</h2>
-                <div className="space-y-2 max-h-[50vh] overflow-y-auto">
-                  <button
-                    onClick={() => { setFilterCategory(""); setShowCategoryFilter(false); }}
-                    className={`w-full py-3.5 px-4 rounded-2xl text-left text-[15px] font-medium transition-all touch-manipulation ${
-                      !filterCategory
-                        ? "bg-[#4169e1] text-white"
-                        : "bg-gray-50 text-gray-700 active:bg-gray-100"
-                    }`}
-                  >
-                    All categories
-                  </button>
-                  {categories.map((c) => (
-                    <button
-                      key={c.id}
-                      onClick={() => { setFilterCategory(c.id); setShowCategoryFilter(false); }}
-                      className={`w-full py-3.5 px-4 rounded-2xl text-left text-[15px] font-medium flex items-center gap-3 transition-all touch-manipulation ${
-                        filterCategory === c.id
-                          ? "bg-[#4169e1] text-white"
-                          : "bg-gray-50 text-gray-700 active:bg-gray-100"
-                      }`}
-                    >
-                      <div
-                        className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${
-                          filterCategory === c.id ? "text-[#4169e1] bg-white/90" : "text-white"
-                        }`}
-                        style={filterCategory === c.id ? undefined : { backgroundColor: c.color }}
-                      >
-                        {c.name[0]}
-                      </div>
-                      <span>{c.name}</span>
-                    </button>
-                  ))}
-                </div>
+              <div
+                className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${
+                  filterCategory === c.id ? "text-[#4169e1] bg-white/90" : "text-white"
+                }`}
+                style={filterCategory === c.id ? undefined : { backgroundColor: c.color }}
+              >
+                {c.name[0]}
               </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+              <span>{c.name}</span>
+            </button>
+          ))}
+        </div>
+      </BottomSheet>
 
       <BottomSheet open={showDeleteConfirm} onClose={() => setShowDeleteConfirm(false)}>
         <h2 className="text-lg font-semibold mb-1">Delete {selectedIds.size} transactions?</h2>
