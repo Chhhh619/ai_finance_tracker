@@ -3,7 +3,8 @@ import { fetchSettings, updateSettings, fetchTransactions } from "../lib/api";
 import { signOut, registerPasskey } from "../lib/auth";
 import { supabase } from "../lib/supabase";
 import { getQueue, flushQueue } from "../lib/offline-queue";
-import { LogOut, Fingerprint, Download, RefreshCw, ChevronRight, Copy, Check, FileSpreadsheet, FileText } from "lucide-react";
+import { LogOut, Fingerprint, Download, RefreshCw, ChevronRight, Copy, Check, FileSpreadsheet, FileText, Sparkles, ExternalLink } from "lucide-react";
+import { SHORTCUT_ICLOUD_URL } from "../lib/constants";
 import BottomSheet from "../components/BottomSheet";
 import { exportTransactionsXLSX, exportTransactionsCSV, exportFilename } from "../lib/export";
 import type { DuplicateHandling, UserSettings } from "../types";
@@ -77,8 +78,6 @@ export default function SettingsPage() {
     );
   }
 
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-
   return (
     <div className="px-6 pt-4 pb-6">
       <h1 className="text-2xl font-semibold mb-6">Settings</h1>
@@ -142,31 +141,22 @@ export default function SettingsPage() {
 
       {/* iOS Shortcut Setup */}
       <section className="mb-6">
-        <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">iOS Shortcut Setup</h2>
-        <div className="bg-gray-50 rounded-2xl p-4 space-y-3 text-sm text-gray-600">
-          <p><span className="font-medium text-gray-800">1.</span> Open Shortcuts app</p>
-          <p><span className="font-medium text-gray-800">2.</span> Create "PocketRinggit Capture"</p>
-          <p><span className="font-medium text-gray-800">3.</span> Add: Take Screenshot</p>
-          <p><span className="font-medium text-gray-800">4.</span> Add: Extract Text from Image</p>
-          <p><span className="font-medium text-gray-800">5.</span> Add: Get Contents of URL</p>
-          <div className="ml-4 space-y-2 text-xs text-gray-500">
-            <div>
-              <p className="font-medium text-gray-600 mb-1">URL:</p>
-              <code className="block bg-white px-2.5 py-2 rounded-lg break-all text-[11px]">{supabaseUrl}/functions/v1/ingest</code>
-            </div>
-            <p><span className="font-medium text-gray-600">Method:</span> POST</p>
-            <div>
-              <p className="font-medium text-gray-600 mb-1">Header:</p>
-              <code className="block bg-white px-2.5 py-2 rounded-lg break-all text-[11px]">Authorization = Bearer {settings.api_key}</code>
-            </div>
-            <div>
-              <p className="font-medium text-gray-600 mb-1">Body (JSON):</p>
-              <code className="block bg-white px-2.5 py-2 rounded-lg break-all text-[11px]">{`{"text": [Extracted Text], "source": "auto", "timestamp": [Current Date ISO]}`}</code>
+        <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">iOS Shortcut</h2>
+        <a
+          href={SHORTCUT_ICLOUD_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center justify-between gap-3 px-4 py-3.5 bg-gray-50 rounded-2xl active:bg-gray-100 transition-colors"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <Sparkles size={18} className="text-[#4169e1] shrink-0" />
+            <div className="min-w-0">
+              <div className="text-[15px] font-medium">Add PocketRinggit Capture</div>
+              <div className="text-xs text-gray-500">Open in Shortcuts, then paste your API key</div>
             </div>
           </div>
-          <p><span className="font-medium text-gray-800">6.</span> Add: Show Notification with response</p>
-          <p><span className="font-medium text-gray-800">7.</span> Assign to Action Button or Back Tap</p>
-        </div>
+          <ExternalLink size={16} className="text-gray-400 shrink-0" />
+        </a>
       </section>
 
       {/* Offline Queue */}
