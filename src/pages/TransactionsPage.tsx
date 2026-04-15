@@ -311,7 +311,13 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
 
   return (
     <div className="pb-6">
-      <div className="sticky top-0 z-30 bg-white px-6 pt-4 pb-3">
+      <div
+        className="sticky top-0 z-30 bg-white px-6 pb-3"
+        style={{
+          marginTop: "calc(-1 * max(env(safe-area-inset-top, 0px), 54px))",
+          paddingTop: "calc(max(env(safe-area-inset-top, 0px), 54px) + 1rem)",
+        }}
+      >
       <div className="flex items-center justify-between mb-5">
         <h1 className="text-2xl font-semibold">Transactions</h1>
         <button
