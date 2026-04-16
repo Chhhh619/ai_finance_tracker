@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Plus, X, Image as ImageIcon } from "lucide-react";
+import { Plus, X, Image as ImageIcon, CalendarDays } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { fetchTransactions, createManualTransaction, updateTransaction, deleteTransaction } from "../lib/api";
 import { supabase } from "../lib/supabase";
 import { addToQueue, getQueue } from "../lib/offline-queue";
 import GradientPieChart from "../components/GradientPieChart";
 import CategoryPicker from "../components/CategoryPicker";
+import Calendar from "../components/Calendar";
 import type { Category, Transaction } from "../types";
 
 const moneyFmt = (n: number) =>
@@ -49,7 +50,10 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
   const [editAmount, setEditAmount] = useState("");
   const [editMerchant, setEditMerchant] = useState("");
   const [editCategory, setEditCategory] = useState("");
+  const [editDate, setEditDate] = useState<Date>(new Date());
   const [showCatPicker, setShowCatPicker] = useState(false);
+  const [showEditDatePicker, setShowEditDatePicker] = useState(false);
+  const editFormRef = useRef<HTMLDivElement | null>(null);
   const [showFab, setShowFab] = useState(true);
   const [chartCategoryId, setChartCategoryId] = useState<string | null>(null);
   const lastScrollY = useRef(0);
@@ -76,6 +80,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
       setEditAmount(String(t.amount));
       setEditMerchant(t.merchant);
       setEditCategory(t.category_id ?? "");
+      setEditDate(new Date(t.transaction_at));
     }, 500);
   };
 
@@ -94,11 +99,33 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
       merchant: editMerchant.trim(),
       category_id: editCategory || undefined,
       needs_review: false,
+      transaction_at: editDate.toISOString(),
     });
     setTransactions((prev) => prev.map((t) => (t.id === id ? updated : t)));
     setEditingId(null);
     onDataChanged();
   };
+
+  // Close edit view on outside click or Esc
+  useEffect(() => {
+    if (!editingId) return;
+    const handlePointer = (e: PointerEvent) => {
+      if (showEditDatePicker || showCatPicker) return;
+      const target = e.target as Node | null;
+      if (editFormRef.current && target && !editFormRef.current.contains(target)) {
+        setEditingId(null);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setEditingId(null);
+    };
+    document.addEventListener("pointerdown", handlePointer);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointer);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [editingId, showEditDatePicker, showCatPicker]);
 
   const handleDelete = async (id: string) => {
     await deleteTransaction(id);
@@ -397,7 +424,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                     <div key={t.id}>
                       {/* Edit mode (long press) */}
                       {editingId === t.id ? (
-                        <div className="p-3 rounded-2xl space-y-2.5 mb-1 bg-gradient-to-br from-[#4169e1]/5 via-[#4169e1]/[0.03] to-transparent border border-[#4169e1]/10">
+                        <div ref={editFormRef} className="p-3 rounded-2xl space-y-2.5 mb-1 bg-gradient-to-br from-[#4169e1]/5 via-[#4169e1]/[0.03] to-transparent border border-[#4169e1]/10">
                           <input
                             type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]*"
                             className="w-full h-11 px-3 bg-white rounded-lg text-sm outline-none"
@@ -426,10 +453,11 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                           </button>
                           <div className="flex gap-2">
                             <button
-                              onPointerUp={() => setEditingId(null)}
-                              className="flex-1 h-11 bg-white rounded-lg text-sm font-medium active:bg-gray-100 transition-colors select-none touch-manipulation"
+                              onClick={() => setShowEditDatePicker(true)}
+                              className="flex-1 h-11 px-3 bg-white rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 active:bg-gray-100 transition-colors select-none touch-manipulation"
                             >
-                              Cancel
+                              <CalendarDays size={14} className="text-gray-500" />
+                              <span className="truncate">{editDate.toLocaleDateString("en-MY", { day: "numeric", month: "short" })}, {editDate.toLocaleTimeString("en-MY", { hour: "2-digit", minute: "2-digit" })}</span>
                             </button>
                             <button
                               onPointerUp={() => void handleSaveEdit(t.id)}
@@ -678,16 +706,8 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                           </button>
 
                           {/* Expanded transaction list for this category */}
-                          <AnimatePresence>
-                            {chartCategoryId === category.id && (
-                              <motion.div
-                                initial={{ height: 0, opacity: 0 }}
-                                animate={{ height: "auto", opacity: 1 }}
-                                exit={{ height: 0, opacity: 0 }}
-                                transition={{ type: "spring", damping: 25, stiffness: 300 }}
-                                className="overflow-hidden"
-                              >
-                                <div className="pt-1.5 pb-1 px-2 space-y-0.5">
+                          {chartCategoryId === category.id && (
+                            <div className="pt-1.5 pb-1 px-2 space-y-0.5 reveal-down">
                                   {transactions
                                     .filter((t) => t.direction === "expense" && t.category_id === category.id)
                                     .map((t) => (
@@ -703,10 +723,8 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                                         <div className="font-semibold text-[14px] ml-4 shrink-0">-{moneyFmt(Number(t.amount))}</div>
                                       </div>
                                     ))}
-                                </div>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -832,6 +850,79 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
         selected={editCategory}
         onSelect={setEditCategory}
       />
+
+      {/* Edit Date/Time Picker */}
+      <AnimatePresence>
+        {showEditDatePicker && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowEditDatePicker(false)}
+            />
+            <motion.div
+              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 28, stiffness: 300 }}
+              className="fixed inset-x-0 bottom-0 bg-white rounded-t-3xl z-50 max-w-md mx-auto"
+              style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 16px)" }}
+            >
+              <div className="p-5">
+                <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-4" />
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold">Date & Time</h2>
+                  <button onClick={() => setShowEditDatePicker(false)} className="p-1.5 hover:bg-gray-100 rounded-full">
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <Calendar
+                  selected={editDate}
+                  onSelect={(d) => {
+                    const next = new Date(editDate);
+                    next.setFullYear(d.getFullYear(), d.getMonth(), d.getDate());
+                    setEditDate(next);
+                  }}
+                />
+
+                <div className="mt-4 flex items-center justify-between gap-3 px-1">
+                  <span className="text-sm font-medium text-gray-600">Time</span>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number" min={0} max={23} inputMode="numeric"
+                      value={String(editDate.getHours()).padStart(2, "0")}
+                      onChange={(e) => {
+                        const h = Math.max(0, Math.min(23, parseInt(e.target.value || "0", 10)));
+                        const next = new Date(editDate);
+                        next.setHours(h);
+                        setEditDate(next);
+                      }}
+                      className="w-14 h-11 text-center bg-gray-50 rounded-lg text-base font-semibold outline-none focus:ring-2 focus:ring-[#4169e1]/20"
+                    />
+                    <span className="text-base font-semibold text-gray-400">:</span>
+                    <input
+                      type="number" min={0} max={59} inputMode="numeric"
+                      value={String(editDate.getMinutes()).padStart(2, "0")}
+                      onChange={(e) => {
+                        const m = Math.max(0, Math.min(59, parseInt(e.target.value || "0", 10)));
+                        const next = new Date(editDate);
+                        next.setMinutes(m);
+                        setEditDate(next);
+                      }}
+                      className="w-14 h-11 text-center bg-gray-50 rounded-lg text-base font-semibold outline-none focus:ring-2 focus:ring-[#4169e1]/20"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setShowEditDatePicker(false)}
+                  className="w-full mt-4 h-11 bg-[#4169e1] text-white rounded-xl text-sm font-medium active:bg-[#3151c1] transition-colors touch-manipulation"
+                >
+                  Done
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

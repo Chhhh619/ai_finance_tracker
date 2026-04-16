@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
 import { fetchTransactions, updateTransaction, deleteTransaction, type TransactionFilters } from "../lib/api";
-import { Search, CalendarDays, X, ChevronDown } from "lucide-react";
+import { Search, CalendarDays, X, ChevronDown, ChevronLeft, ChevronRight, Check, Download, FileSpreadsheet, FileText, Trash2 } from "lucide-react";
 import Calendar, { toKey } from "../components/Calendar";
 import CategoryPicker from "../components/CategoryPicker";
+import BottomSheet from "../components/BottomSheet";
+import Toast from "../components/Toast";
+import { exportTransactionsXLSX, exportTransactionsCSV, exportFilename } from "../lib/export";
 import type { Category, Transaction } from "../types";
 
 const moneyFmt = (n: number) =>
@@ -18,7 +20,8 @@ const relativeDate = (iso: string) => {
   if (diff === 0) return "Today";
   if (diff === 1) return "Yesterday";
   if (diff < 7) return d.toLocaleDateString("en-MY", { weekday: "long" });
-  return d.toLocaleDateString("en-MY", { day: "numeric", month: "short" });
+  const sameYear = d.getFullYear() === now.getFullYear();
+  return d.toLocaleDateString("en-MY", sameYear ? { day: "numeric", month: "short" } : { day: "numeric", month: "short", year: "numeric" });
 };
 
 type DateFilterMode = "all" | "day" | "week" | "month";
@@ -39,10 +42,24 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
   const [editAmount, setEditAmount] = useState("");
   const [editMerchant, setEditMerchant] = useState("");
   const [editCategory, setEditCategory] = useState("");
+  const [editDate, setEditDate] = useState<Date>(new Date());
   const [showCatPicker, setShowCatPicker] = useState(false);
+  const [showEditDatePicker, setShowEditDatePicker] = useState(false);
+  const editFormRef = useRef<HTMLDivElement | null>(null);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pressingId, setPressingId] = useState<string | null>(null);
+  const [heldId, setHeldId] = useState<string | null>(null);
+
+  // Selection mode
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [exportSubOpen, setExportSubOpen] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   // Date filter
   const [showCalendar, setShowCalendar] = useState(false);
@@ -116,6 +133,27 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, filterSource, filterCategory, showReviewOnly, dateRange]);
 
+  // Close edit view on outside click or Esc
+  useEffect(() => {
+    if (!editingId) return;
+    const handlePointer = (e: PointerEvent) => {
+      if (showEditDatePicker || showCatPicker) return;
+      const target = e.target as Node | null;
+      if (editFormRef.current && target && !editFormRef.current.contains(target)) {
+        setEditingId(null);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setEditingId(null);
+    };
+    document.addEventListener("pointerdown", handlePointer);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointer);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [editingId, showEditDatePicker, showCatPicker]);
+
   // Build set of dates with transactions for calendar dots
   const activeDates = useMemo(() => {
     const set = new Set<string>();
@@ -130,18 +168,25 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
   [transactions]);
 
   const handleTap = (t: Transaction) => {
+    if (selectionMode) { toggleSelected(t.id); return; }
     if (editingId === t.id) return;
     setDetailId(detailId === t.id ? null : t.id);
     setEditingId(null);
   };
 
   const startLongPress = (t: Transaction) => {
+    if (selectionMode) return;
+    setPressingId(t.id);
+    holdTimer.current = setTimeout(() => setHeldId(t.id), 200);
     longPressTimer.current = setTimeout(() => {
       setEditingId(t.id);
       setDetailId(null);
       setEditAmount(String(t.amount));
       setEditMerchant(t.merchant);
       setEditCategory(t.category_id ?? "");
+      setEditDate(new Date(t.transaction_at));
+      setPressingId(null);
+      setHeldId(null);
     }, 500);
   };
 
@@ -150,6 +195,12 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
       clearTimeout(longPressTimer.current);
       longPressTimer.current = null;
     }
+    if (holdTimer.current) {
+      clearTimeout(holdTimer.current);
+      holdTimer.current = null;
+    }
+    setPressingId(null);
+    setHeldId(null);
   };
 
   const handleSaveEdit = async (id: string) => {
@@ -160,6 +211,7 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
       merchant: editMerchant.trim(),
       category_id: editCategory || undefined,
       needs_review: false,
+      transaction_at: editDate.toISOString(),
     });
     setTransactions((prev) => prev.map((t) => (t.id === id ? updated : t)));
     setEditingId(null);
@@ -176,6 +228,69 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
     setSelectedDate(date);
     if (dateMode === "all") setDateMode("day");
   };
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const exitSelection = () => {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+    setMoreOpen(false);
+    setExportSubOpen(false);
+  };
+
+  const enterSelection = () => {
+    setSelectionMode(true);
+    setDetailId(null);
+    setEditingId(null);
+  };
+
+  const selectedTransactions = useMemo(
+    () => transactions.filter((t) => selectedIds.has(t.id)),
+    [transactions, selectedIds]
+  );
+
+  const handleExport = (kind: "xlsx" | "csv") => {
+    const filename = exportFilename(kind);
+    const count = selectedTransactions.length;
+    if (kind === "xlsx") exportTransactionsXLSX(selectedTransactions, filename);
+    else exportTransactionsCSV(selectedTransactions, filename);
+    setToastMsg(`Exported ${count} transactions`);
+    exitSelection();
+  };
+
+  const handleConfirmDelete = async () => {
+    const ids = Array.from(selectedIds);
+    const total = ids.length;
+    setShowDeleteConfirm(false);
+    const results = await Promise.allSettled(ids.map((id) => deleteTransaction(id)));
+    const ok: string[] = [];
+    results.forEach((r, i) => { if (r.status === "fulfilled") ok.push(ids[i]); });
+    const okSet = new Set(ok);
+    setTransactions((prev) => prev.filter((t) => !okSet.has(t.id)));
+    const failed = total - ok.length;
+    setToastMsg(failed === 0 ? `Deleted ${total} transactions` : `Deleted ${ok.length} of ${total} — ${failed} failed`);
+    exitSelection();
+  };
+
+  // Close More popover on outside pointerdown
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onPointer = (e: PointerEvent) => {
+      const target = e.target as Element | null;
+      if (target && !target.closest("[data-more-popover]")) {
+        setMoreOpen(false);
+        setExportSubOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointer);
+    return () => document.removeEventListener("pointerdown", onPointer);
+  }, [moreOpen]);
 
   // Group transactions by date
   const grouped = (() => {
@@ -195,7 +310,14 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
   })();
 
   return (
-    <div className="px-6 pt-4 pb-6">
+    <div className="pb-6">
+      <div
+        className="sticky top-0 z-30 bg-white px-6 pb-3"
+        style={{
+          marginTop: "calc(-1 * max(env(safe-area-inset-top, 0px), 54px))",
+          paddingTop: "calc(max(env(safe-area-inset-top, 0px), 54px) + 1rem)",
+        }}
+      >
       <div className="flex items-center justify-between mb-5">
         <h1 className="text-2xl font-semibold">Transactions</h1>
         <button
@@ -208,18 +330,90 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
       </div>
 
       {/* Date mode pills */}
-      <div className="flex gap-2 mb-4">
-        {(["all", "day", "week", "month"] as const).map((m) => (
-          <button
-            key={m}
-            onClick={() => setDateMode(m)}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all touch-manipulation ${
-              dateMode === m ? "bg-[#4169e1] text-white" : "bg-gray-50 text-gray-500 active:bg-gray-100"
-            }`}
-          >
-            {m === "all" ? "All" : m === "day" ? "Day" : m === "week" ? "Week" : "Month"}
-          </button>
-        ))}
+      <div className="flex items-center justify-between gap-2 mb-4">
+        <div className="flex gap-2">
+          {(["all", "day", "week", "month"] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => setDateMode(m)}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all touch-manipulation ${
+                dateMode === m ? "bg-[#4169e1] text-white" : "bg-gray-50 text-gray-500 active:bg-gray-100"
+              }`}
+            >
+              {m === "all" ? "All" : m === "day" ? "Day" : m === "week" ? "Week" : "Month"}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2 relative" data-more-popover>
+          {!selectionMode ? (
+            <button
+              onClick={enterSelection}
+              className="h-8 px-3 rounded-xl text-xs font-medium bg-gray-50 text-gray-600 active:bg-gray-100 transition-colors touch-manipulation"
+            >
+              Select
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={() => { if (selectedIds.size > 0) setMoreOpen((v) => !v); }}
+                disabled={selectedIds.size === 0}
+                className={`h-8 px-3 rounded-xl text-xs font-medium flex items-center gap-1 transition-colors touch-manipulation ${
+                  selectedIds.size === 0
+                    ? "bg-[#4169e1]/40 text-white cursor-not-allowed"
+                    : "bg-[#4169e1] text-white active:bg-[#3151c1]"
+                }`}
+              >
+                More <ChevronDown size={12} />
+              </button>
+              {moreOpen && (
+                <div className="absolute right-0 top-full mt-2 w-44 rounded-xl bg-white shadow-lg border border-gray-100 z-50 overflow-hidden">
+                  {!exportSubOpen ? (
+                    <>
+                      <button
+                        onClick={() => setExportSubOpen(true)}
+                        className="w-full flex items-center justify-between px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100"
+                      >
+                        <span className="flex items-center gap-2.5"><Download size={16} className="text-gray-500" />Export</span>
+                        <ChevronRight size={14} className="text-gray-400" />
+                      </button>
+                      <button
+                        onClick={() => { setMoreOpen(false); setShowDeleteConfirm(true); }}
+                        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-red-500 hover:bg-red-50 active:bg-red-100 border-t border-gray-50"
+                      >
+                        <Trash2 size={16} />
+                        Delete
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => setExportSubOpen(false)}
+                        className="w-full flex items-center gap-2 px-3.5 py-2 text-xs text-gray-500 hover:bg-gray-50 border-b border-gray-50"
+                      >
+                        <ChevronLeft size={14} /> Back
+                      </button>
+                      <button
+                        onClick={() => { handleExport("xlsx"); setMoreOpen(false); setExportSubOpen(false); }}
+                        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100"
+                      >
+                        <FileSpreadsheet size={16} className="text-gray-500" />
+                        Export as XLSX
+                      </button>
+                      <button
+                        onClick={() => { handleExport("csv"); setMoreOpen(false); setExportSubOpen(false); }}
+                        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100 border-t border-gray-50"
+                      >
+                        <FileText size={16} className="text-gray-500" />
+                        Export as CSV
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       {/* Period total */}
@@ -284,16 +478,18 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
         </button>
       </div>
 
+      </div>
+      <div className="pt-3 px-3">
       {/* Transaction list */}
       {grouped.length === 0 && !loading ? (
-        <p className="text-gray-400 text-sm py-12 text-center">
+        <p className="text-gray-400 text-sm py-12 text-center px-3">
           {dateMode !== "all" ? `No transactions for ${dateRange.label}.` : "No transactions found."}
         </p>
       ) : (
         <div className="space-y-6">
           {grouped.map((group) => (
             <div key={group.date}>
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center justify-between mb-2 px-3">
                 <span className="text-xs font-medium text-gray-400">{group.label}</span>
                 <span className="text-xs text-gray-400">-{moneyFmt(group.dayTotal)}</span>
               </div>
@@ -301,7 +497,7 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
                 {group.transactions.map((t) => (
                   <div key={t.id}>
                     {editingId === t.id ? (
-                      <div className="p-3 rounded-2xl space-y-2.5 mb-1 bg-gradient-to-br from-[#4169e1]/5 via-[#4169e1]/[0.03] to-transparent border border-[#4169e1]/10">
+                      <div ref={editFormRef} className="mx-3 p-3 rounded-2xl space-y-2.5 mb-1 bg-gradient-to-br from-[#4169e1]/5 via-[#4169e1]/[0.03] to-transparent border border-[#4169e1]/10">
                         <input
                           type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]*"
                           className="w-full h-11 px-3 bg-white rounded-lg text-sm outline-none"
@@ -330,10 +526,11 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
                         </button>
                         <div className="flex gap-2">
                           <button
-                            onPointerUp={() => setEditingId(null)}
-                            className="flex-1 h-11 bg-white rounded-lg text-sm font-medium active:bg-gray-100 transition-colors select-none touch-manipulation"
+                            onClick={() => setShowEditDatePicker(true)}
+                            className="flex-1 h-11 px-3 bg-white rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 active:bg-gray-100 transition-colors select-none touch-manipulation"
                           >
-                            Cancel
+                            <CalendarDays size={14} className="text-gray-500" />
+                            <span className="truncate">{editDate.toLocaleDateString("en-MY", { day: "numeric", month: "short" })}, {editDate.toLocaleTimeString("en-MY", { hour: "2-digit", minute: "2-digit" })}</span>
                           </button>
                           <button
                             onPointerUp={() => void handleSaveEdit(t.id)}
@@ -361,8 +558,15 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
                           onMouseDown={() => startLongPress(t)}
                           onMouseUp={cancelLongPress}
                           onMouseLeave={cancelLongPress}
-                          className="flex items-center justify-between min-h-[44px] py-2.5 border-b border-gray-50 last:border-0 active:bg-gray-50/50 rounded-lg transition-colors cursor-pointer select-none touch-manipulation"
+                          className={`flex items-center justify-between min-h-[44px] px-3 py-2.5 border-b border-gray-50 last:border-0 rounded-lg transition-colors duration-150 cursor-pointer select-none touch-manipulation ${selectedIds.has(t.id) ? "bg-[#4169e1]/5" : heldId === t.id ? "bg-blue-200" : pressingId === t.id ? "bg-blue-50" : "active:bg-gray-50/50"}`}
                         >
+                          {selectionMode && (
+                            <div className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 mr-3 ${
+                              selectedIds.has(t.id) ? "bg-[#4169e1] border-[#4169e1]" : "border-gray-300 bg-white"
+                            }`}>
+                              {selectedIds.has(t.id) && <Check size={14} className="text-white" />}
+                            </div>
+                          )}
                           <div className="flex items-center gap-3 min-w-0 flex-1">
                             <div
                               className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 text-white text-xs font-bold"
@@ -389,7 +593,7 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
                         </div>
 
                         {detailId === t.id && (
-                          <div className="px-3 py-3 mb-1 bg-gray-50 rounded-xl text-sm space-y-1.5">
+                          <div className="mx-3 px-3 py-3 mb-1 bg-gray-50 rounded-xl text-sm space-y-1.5">
                             <div className="flex justify-between">
                               <span className="text-gray-400">Date</span>
                               <span>{new Date(t.transaction_at).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
@@ -416,7 +620,6 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
                                 <span>{Math.round(t.confidence * 100)}%</span>
                               </div>
                             )}
-                            <p className="text-xs text-gray-400 pt-1">Long press to edit</p>
                           </div>
                         )}
                       </div>
@@ -430,65 +633,49 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
       )}
 
       {hasMore && (
-        <button
-          className="w-full mt-6 py-3 text-sm font-medium text-[#4169e1] bg-[#4169e1]/5 rounded-xl active:bg-[#4169e1]/10 transition-colors"
-          onClick={() => void loadTransactions(false)} disabled={loading}
-        >
-          {loading ? "Loading..." : "Load more"}
-        </button>
+        <div className="px-3">
+          <button
+            className="w-full mt-6 py-3 text-sm font-medium text-[#4169e1] bg-[#4169e1]/5 rounded-xl active:bg-[#4169e1]/10 transition-colors"
+            onClick={() => void loadTransactions(false)} disabled={loading}
+          >
+            {loading ? "Loading..." : "Load more"}
+          </button>
+        </div>
       )}
+      </div>
 
       {/* Calendar bottom sheet */}
-      <AnimatePresence>
-        {showCalendar && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowCalendar(false)}
-            />
-            <motion.div
-              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 28, stiffness: 300 }}
-              className="fixed inset-x-0 bottom-0 bg-white rounded-t-3xl z-50 max-w-md mx-auto"
-              style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 16px)" }}
+      <BottomSheet open={showCalendar} onClose={() => setShowCalendar(false)}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Select Date</h2>
+          <button onClick={() => setShowCalendar(false)} className="p-1.5 hover:bg-gray-100 rounded-full">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="flex gap-2 mb-4">
+          {(["day", "week", "month"] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => setDateMode(m)}
+              className={`flex-1 py-2 rounded-xl text-sm font-medium transition-all ${
+                dateMode === m ? "bg-[#4169e1] text-white" : "bg-gray-100 text-gray-600"
+              }`}
             >
-              <div className="p-5">
-                <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-4" />
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold">Select Date</h2>
-                  <button onClick={() => setShowCalendar(false)} className="p-1.5 hover:bg-gray-100 rounded-full">
-                    <X size={18} />
-                  </button>
-                </div>
+              {m === "day" ? "Day" : m === "week" ? "Week" : "Month"}
+            </button>
+          ))}
+        </div>
 
-                {/* Filter mode pills inside calendar */}
-                <div className="flex gap-2 mb-4">
-                  {(["day", "week", "month"] as const).map((m) => (
-                    <button
-                      key={m}
-                      onClick={() => setDateMode(m)}
-                      className={`flex-1 py-2 rounded-xl text-sm font-medium transition-all ${
-                        dateMode === m ? "bg-[#4169e1] text-white" : "bg-gray-100 text-gray-600"
-                      }`}
-                    >
-                      {m === "day" ? "Day" : m === "week" ? "Week" : "Month"}
-                    </button>
-                  ))}
-                </div>
-
-                <Calendar
-                  selected={selectedDate}
-                  onSelect={(d) => {
-                    handleDateSelect(d);
-                    setShowCalendar(false);
-                  }}
-                  activeDates={activeDates}
-                />
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+        <Calendar
+          selected={selectedDate}
+          onSelect={(d) => {
+            handleDateSelect(d);
+            setShowCalendar(false);
+          }}
+          activeDates={activeDates}
+        />
+      </BottomSheet>
 
       {/* Category Picker */}
       <CategoryPicker
@@ -499,105 +686,166 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
         onSelect={setEditCategory}
       />
 
-      {/* Source Filter Picker */}
-      <AnimatePresence>
-        {showSourcePicker && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowSourcePicker(false)}
+      {/* Edit Date/Time Picker */}
+      <BottomSheet open={showEditDatePicker} onClose={() => setShowEditDatePicker(false)}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Date & Time</h2>
+          <button onClick={() => setShowEditDatePicker(false)} className="p-1.5 hover:bg-gray-100 rounded-full">
+            <X size={18} />
+          </button>
+        </div>
+
+        <Calendar
+          selected={editDate}
+          onSelect={(d) => {
+            const next = new Date(editDate);
+            next.setFullYear(d.getFullYear(), d.getMonth(), d.getDate());
+            setEditDate(next);
+          }}
+        />
+
+        <div className="mt-4 flex items-center justify-between gap-3 px-1">
+          <span className="text-sm font-medium text-gray-600">Time</span>
+          <div className="flex items-center gap-2">
+            <input
+              type="number" min={0} max={23} inputMode="numeric"
+              value={String(editDate.getHours()).padStart(2, "0")}
+              onChange={(e) => {
+                const h = Math.max(0, Math.min(23, parseInt(e.target.value || "0", 10)));
+                const next = new Date(editDate);
+                next.setHours(h);
+                setEditDate(next);
+              }}
+              className="w-14 h-11 text-center bg-gray-50 rounded-lg text-base font-semibold outline-none focus:ring-2 focus:ring-[#4169e1]/20"
             />
-            <motion.div
-              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 28, stiffness: 300 }}
-              className="fixed inset-x-0 bottom-0 bg-white rounded-t-3xl z-50 max-w-md mx-auto"
-              style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 16px)" }}
+            <span className="text-base font-semibold text-gray-400">:</span>
+            <input
+              type="number" min={0} max={59} inputMode="numeric"
+              value={String(editDate.getMinutes()).padStart(2, "0")}
+              onChange={(e) => {
+                const m = Math.max(0, Math.min(59, parseInt(e.target.value || "0", 10)));
+                const next = new Date(editDate);
+                next.setMinutes(m);
+                setEditDate(next);
+              }}
+              className="w-14 h-11 text-center bg-gray-50 rounded-lg text-base font-semibold outline-none focus:ring-2 focus:ring-[#4169e1]/20"
+            />
+          </div>
+        </div>
+
+        <button
+          onClick={() => setShowEditDatePicker(false)}
+          className="w-full mt-4 h-11 bg-[#4169e1] text-white rounded-xl text-sm font-medium active:bg-[#3151c1] transition-colors touch-manipulation"
+        >
+          Done
+        </button>
+      </BottomSheet>
+
+      {/* Source Filter Picker */}
+      <BottomSheet open={showSourcePicker} onClose={() => setShowSourcePicker(false)}>
+        <h2 className="text-lg font-semibold mb-4">Source</h2>
+        <div className="space-y-2">
+          {[
+            { value: "", label: "All sources" },
+            { value: "ewallet", label: "E-wallet" },
+            { value: "bank", label: "Bank" },
+            { value: "manual", label: "Manual" },
+            { value: "receipt", label: "Receipt" },
+          ].map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => { setFilterSource(opt.value); setShowSourcePicker(false); }}
+              className={`w-full py-3.5 px-4 rounded-2xl text-left text-[15px] font-medium transition-all touch-manipulation ${
+                filterSource === opt.value
+                  ? "bg-[#4169e1] text-white"
+                  : "bg-gray-50 text-gray-700 active:bg-gray-100"
+              }`}
             >
-              <div className="px-6 pt-5 pb-4">
-                <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-5" />
-                <h2 className="text-lg font-semibold mb-4">Source</h2>
-                <div className="space-y-2">
-                  {[
-                    { value: "", label: "All sources" },
-                    { value: "ewallet", label: "E-wallet" },
-                    { value: "bank", label: "Bank" },
-                    { value: "manual", label: "Manual" },
-                    { value: "receipt", label: "Receipt" },
-                  ].map((opt) => (
-                    <button
-                      key={opt.value}
-                      onClick={() => { setFilterSource(opt.value); setShowSourcePicker(false); }}
-                      className={`w-full py-3.5 px-4 rounded-2xl text-left text-[15px] font-medium transition-all touch-manipulation ${
-                        filterSource === opt.value
-                          ? "bg-[#4169e1] text-white"
-                          : "bg-gray-50 text-gray-700 active:bg-gray-100"
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </BottomSheet>
 
       {/* Category Filter Picker */}
-      <AnimatePresence>
-        {showCategoryFilter && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowCategoryFilter(false)}
-            />
-            <motion.div
-              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 28, stiffness: 300 }}
-              className="fixed inset-x-0 bottom-0 bg-white rounded-t-3xl z-50 max-w-md mx-auto"
-              style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 16px)" }}
+      <BottomSheet open={showCategoryFilter} onClose={() => setShowCategoryFilter(false)}>
+        <h2 className="text-lg font-semibold mb-4">Category</h2>
+        <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+          <button
+            onClick={() => { setFilterCategory(""); setShowCategoryFilter(false); }}
+            className={`w-full py-3.5 px-4 rounded-2xl text-left text-[15px] font-medium transition-all touch-manipulation ${
+              !filterCategory
+                ? "bg-[#4169e1] text-white"
+                : "bg-gray-50 text-gray-700 active:bg-gray-100"
+            }`}
+          >
+            All categories
+          </button>
+          {categories.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => { setFilterCategory(c.id); setShowCategoryFilter(false); }}
+              className={`w-full py-3.5 px-4 rounded-2xl text-left text-[15px] font-medium flex items-center gap-3 transition-all touch-manipulation ${
+                filterCategory === c.id
+                  ? "bg-[#4169e1] text-white"
+                  : "bg-gray-50 text-gray-700 active:bg-gray-100"
+              }`}
             >
-              <div className="px-6 pt-5 pb-4">
-                <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-5" />
-                <h2 className="text-lg font-semibold mb-4">Category</h2>
-                <div className="space-y-2 max-h-[50vh] overflow-y-auto">
-                  <button
-                    onClick={() => { setFilterCategory(""); setShowCategoryFilter(false); }}
-                    className={`w-full py-3.5 px-4 rounded-2xl text-left text-[15px] font-medium transition-all touch-manipulation ${
-                      !filterCategory
-                        ? "bg-[#4169e1] text-white"
-                        : "bg-gray-50 text-gray-700 active:bg-gray-100"
-                    }`}
-                  >
-                    All categories
-                  </button>
-                  {categories.map((c) => (
-                    <button
-                      key={c.id}
-                      onClick={() => { setFilterCategory(c.id); setShowCategoryFilter(false); }}
-                      className={`w-full py-3.5 px-4 rounded-2xl text-left text-[15px] font-medium flex items-center gap-3 transition-all touch-manipulation ${
-                        filterCategory === c.id
-                          ? "bg-[#4169e1] text-white"
-                          : "bg-gray-50 text-gray-700 active:bg-gray-100"
-                      }`}
-                    >
-                      <div
-                        className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${
-                          filterCategory === c.id ? "text-[#4169e1] bg-white/90" : "text-white"
-                        }`}
-                        style={filterCategory === c.id ? undefined : { backgroundColor: c.color }}
-                      >
-                        {c.name[0]}
-                      </div>
-                      <span>{c.name}</span>
-                    </button>
-                  ))}
-                </div>
+              <div
+                className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${
+                  filterCategory === c.id ? "text-[#4169e1] bg-white/90" : "text-white"
+                }`}
+                style={filterCategory === c.id ? undefined : { backgroundColor: c.color }}
+              >
+                {c.name[0]}
               </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+              <span>{c.name}</span>
+            </button>
+          ))}
+        </div>
+      </BottomSheet>
+
+      <BottomSheet open={showDeleteConfirm} onClose={() => setShowDeleteConfirm(false)}>
+        <h2 className="text-lg font-semibold mb-1">Delete {selectedIds.size} transactions?</h2>
+        <p className="text-sm text-gray-500 mb-4">This cannot be undone.</p>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowDeleteConfirm(false)}
+            className="flex-1 h-11 rounded-xl bg-gray-100 text-gray-700 text-sm font-medium active:bg-gray-200 touch-manipulation"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => void handleConfirmDelete()}
+            className="flex-1 h-11 rounded-xl bg-red-500 text-white text-sm font-medium active:bg-red-600 touch-manipulation"
+          >
+            Delete
+          </button>
+        </div>
+      </BottomSheet>
+
+      {selectionMode && (
+        <div
+          className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t border-gray-100 z-40"
+          style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 4px)" }}
+        >
+          <div className="flex items-center justify-between max-w-md mx-auto h-14 px-5">
+            <button
+              onClick={exitSelection}
+              aria-label="Cancel selection"
+              className="h-9 w-9 flex items-center justify-center rounded-xl bg-gray-100 text-gray-700 active:bg-gray-200 touch-manipulation"
+            >
+              <X size={18} />
+            </button>
+            <span className="text-sm font-medium text-gray-700">
+              {selectedIds.size} selected
+            </span>
+            <div className="w-9" />
+          </div>
+        </div>
+      )}
+
+      <Toast message={toastMsg} onDone={() => setToastMsg(null)} />
     </div>
   );
 }

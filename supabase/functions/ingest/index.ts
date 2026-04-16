@@ -53,7 +53,7 @@ async function callGeminiFlash(
     "- category: string (from the list above)",
     `- source: "${source === "receipt" ? "receipt" : "manual"}" (use this exact value)`,
     "- confidence: number 0-1",
-    "- transaction_at: ISO datetime string if visible, otherwise omit",
+    `- transaction_at: ISO datetime string if visible, otherwise omit. The current date/time is ${new Date().toISOString()} (UTC). If the source shows only a date like "14 Apr" or "14/04" without a year, assume the current year. Never invent a year — if no date is visible at all, omit this field.`,
     "",
     "Return a JSON array only. No markdown, no explanation.",
     "If no financial transaction is found, return: []",
@@ -208,7 +208,7 @@ Deno.serve(async (req) => {
   const debug = geminiResult.debug;
 
   if (!transactions || transactions.length === 0) {
-    return new Response(JSON.stringify({ status: "empty", message: "No transaction detected", debug }), {
+    return new Response(JSON.stringify({ status: "empty", message: "🔍 No transaction found in this capture", debug }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -264,20 +264,31 @@ Deno.serve(async (req) => {
     .select();
 
   if (insertError) {
-    return new Response(JSON.stringify({ status: "error", message: "Failed to save transactions" }), {
+    return new Response(JSON.stringify({ status: "error", message: "❌ Couldn't save — please try again" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
-  const messages = (inserted ?? []).map((t: { amount: number; merchant: string; direction: string }) =>
-    `${t.direction === "expense" ? "Recorded" : "Received"} RM ${Number(t.amount).toFixed(2)} ${t.direction === "expense" ? "→" : "←"} ${t.merchant}`
-  );
+  const categoryById = new Map((categories ?? []).map((c: { id: string; name: string }) => [c.id, c.name]));
+
+  const lines = (inserted ?? []).map((t: { amount: number; merchant: string; direction: string; category_id: string | null; needs_review: boolean }) => {
+    const arrow = t.direction === "expense" ? "−" : "+";
+    const cat = t.category_id ? (categoryById.get(t.category_id) ?? "Others") : "Others";
+    const review = t.needs_review ? " ⚠︎" : "";
+    return `${arrow}RM${Number(t.amount).toFixed(2)} · ${t.merchant} · ${cat}${review}`;
+  });
+
+  const header = inserted && inserted.length > 1
+    ? `✅ Saved ${inserted.length} transactions`
+    : "✅ Saved";
+
+  const message = `${header}\n${lines.join("\n")}`;
 
   return new Response(JSON.stringify({
     status: "ok",
     entries: inserted,
-    message: messages.join("; ") || "Transaction recorded",
+    message,
     debug,
   }), {
     status: 200,

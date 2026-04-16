@@ -14,13 +14,13 @@ export async function fetchCategories(): Promise<Category[]> {
   return data;
 }
 
-export async function createCategory(name: string, color: string): Promise<Category> {
+export async function createCategory(name: string, color: string, icon: string | null = null): Promise<Category> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
 
   const { data, error } = await supabase
     .from("categories")
-    .insert({ user_id: user.id, name, color, is_default: false })
+    .insert({ user_id: user.id, name, color, icon, is_default: false })
     .select()
     .single();
 
@@ -82,7 +82,7 @@ export async function fetchTransactions(filters: TransactionFilters = {}): Promi
 
 export async function updateTransaction(
   id: string,
-  updates: Partial<Pick<Transaction, "amount" | "merchant" | "description" | "category_id" | "direction" | "needs_review">>
+  updates: Partial<Pick<Transaction, "amount" | "merchant" | "description" | "category_id" | "direction" | "needs_review" | "transaction_at">>
 ): Promise<Transaction> {
   const { data, error } = await supabase
     .from("transactions")
