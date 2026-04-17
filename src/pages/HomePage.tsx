@@ -7,7 +7,8 @@ import { supabase } from "../lib/supabase";
 import { addToQueue, getQueue } from "../lib/offline-queue";
 import GradientPieChart from "../components/GradientPieChart";
 import CategoryPicker from "../components/CategoryPicker";
-import Calendar from "../components/Calendar";
+import DateTimePickerSheet from "../components/DateTimePickerSheet";
+import BottomSheet from "../components/BottomSheet";
 import type { Category, Transaction } from "../types";
 
 const moneyFmt = (n: number) =>
@@ -63,6 +64,9 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
   const [manualAmount, setManualAmount] = useState("");
   const [manualMerchant, setManualMerchant] = useState("");
   const [manualCategory, setManualCategory] = useState("");
+  const [manualDate, setManualDate] = useState<Date>(new Date());
+  const [showManualDatePicker, setShowManualDatePicker] = useState(false);
+  const [showManualCatPicker, setShowManualCatPicker] = useState(false);
   const [inputText, setInputText] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -329,9 +333,10 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
       await createManualTransaction({
         amount, merchant: manualMerchant.trim(), category_id: manualCategory,
         direction: "expense", source: "manual",
+        transaction_at: manualDate.toISOString(),
       });
       setCaptureStatus(`Recorded RM${amount.toFixed(2)} - ${manualMerchant.trim()}`);
-      setManualAmount(""); setManualMerchant("");
+      setManualAmount(""); setManualMerchant(""); setManualDate(new Date());
       onDataChanged(); void loadData();
     } catch { setCaptureStatus("Failed to save."); }
     finally { setIsProcessing(false); }
@@ -608,45 +613,28 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
       </AnimatePresence>
 
       {/* ─── Time Period Picker ─── */}
-      <AnimatePresence>
-        {showPeriodPicker && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowPeriodPicker(false)}
-            />
-            <motion.div
-              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 28, stiffness: 300 }}
-              className="fixed inset-x-0 bottom-0 bg-white rounded-t-3xl z-50 max-w-md mx-auto safe-bottom"
+      <BottomSheet open={showPeriodPicker} onClose={() => setShowPeriodPicker(false)}>
+        <h2 className="text-lg font-semibold mb-4">Time Period</h2>
+        <div className="space-y-2">
+          {([
+            { value: "day" as const, label: "Today" },
+            { value: "week" as const, label: "This Week" },
+            { value: "month" as const, label: "This Month" },
+          ]).map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => { setPeriod(opt.value); setShowPeriodPicker(false); }}
+              className={`w-full py-3.5 px-4 rounded-2xl text-left text-[15px] font-medium transition-all ${
+                period === opt.value
+                  ? "bg-[#4169e1] text-white"
+                  : "bg-gray-50 text-gray-700 active:bg-gray-100"
+              }`}
             >
-              <div className="p-6">
-                <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-5" />
-                <h2 className="text-lg font-semibold mb-4">Time Period</h2>
-                <div className="space-y-2">
-                  {([
-                    { value: "day" as const, label: "Today" },
-                    { value: "week" as const, label: "This Week" },
-                    { value: "month" as const, label: "This Month" },
-                  ]).map((opt) => (
-                    <button
-                      key={opt.value}
-                      onClick={() => { setPeriod(opt.value); setShowPeriodPicker(false); }}
-                      className={`w-full py-3.5 px-4 rounded-2xl text-left text-[15px] font-medium transition-all ${
-                        period === opt.value
-                          ? "bg-[#4169e1] text-white"
-                          : "bg-gray-50 text-gray-700 active:bg-gray-100"
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </BottomSheet>
 
       {/* ─── Chart Modal (amount tap) ─── */}
       <AnimatePresence>
@@ -739,21 +727,8 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
       </AnimatePresence>
 
       {/* ─── Capture Modal ─── */}
-      <AnimatePresence>
-        {showCapture && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowCapture(false)}
-            />
-            <motion.div
-              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 28, stiffness: 300 }}
-              className="fixed inset-x-0 bottom-0 bg-white rounded-t-3xl z-50 max-w-md mx-auto safe-bottom"
-            >
-              <div className="p-6">
-                <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-5" />
-                <div className="flex items-center justify-between mb-5">
+      <BottomSheet open={showCapture} onClose={() => setShowCapture(false)}>
+        <div className="flex items-center justify-between mb-5">
                   <h2 className="text-lg font-semibold">Add Transaction</h2>
                   <button onClick={() => setShowCapture(false)} className="p-1.5 hover:bg-gray-100 rounded-full">
                     <X size={18} />
@@ -793,12 +768,31 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                       className="w-full h-12 px-4 bg-gray-50 rounded-xl text-base outline-none focus:ring-2 focus:ring-[#4169e1]/20"
                       placeholder="Merchant name" value={manualMerchant} onChange={(e) => setManualMerchant(e.target.value)} required
                     />
-                    <select
-                      className="w-full h-12 px-4 bg-gray-50 rounded-xl text-base outline-none appearance-none"
-                      value={manualCategory} onChange={(e) => setManualCategory(e.target.value)}
+                    <button
+                      type="button"
+                      onClick={() => setShowManualCatPicker(true)}
+                      className="w-full h-12 px-4 bg-gray-50 rounded-xl text-base flex items-center gap-2 active:bg-gray-100 transition-colors touch-manipulation"
                     >
-                      {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
+                      {(() => {
+                        const cat = categories.find((c) => c.id === manualCategory);
+                        return cat ? (
+                          <>
+                            <div className="w-6 h-6 rounded-md text-white text-[11px] font-bold flex items-center justify-center shrink-0" style={{ backgroundColor: cat.color }}>{cat.name[0]}</div>
+                            <span className="truncate">{cat.name}</span>
+                          </>
+                        ) : <span className="text-gray-400">Select category</span>;
+                      })()}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowManualDatePicker(true)}
+                      className="w-full h-12 px-4 bg-gray-50 rounded-xl text-base flex items-center gap-2 active:bg-gray-100 transition-colors touch-manipulation"
+                    >
+                      <CalendarDays size={16} className="text-gray-500 shrink-0" />
+                      <span className="truncate">
+                        {manualDate.toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })}, {manualDate.toLocaleTimeString("en-MY", { hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    </button>
                     <button
                       className="w-full h-12 bg-[#4169e1] text-white rounded-xl font-medium active:scale-[0.98] transition-all disabled:opacity-50"
                       type="submit" disabled={isProcessing}
@@ -809,7 +803,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                 ) : (
                   <div className="space-y-3">
                     <textarea
-                      className="w-full h-28 p-4 bg-gray-50 rounded-xl text-base outline-none resize-none focus:ring-2 focus:ring-[#4169e1]/20"
+                      className="w-full h-28 p-4 bg-gray-50 rounded-xl text-base outline-none focus:ring-2 focus:ring-[#4169e1]/20 resize-none"
                       placeholder="Paste notification or receipt text..."
                       value={inputText} onChange={(e) => setInputText(e.target.value)}
                     />
@@ -835,12 +829,8 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                   </div>
                 )}
 
-                {captureStatus && <pre className="mt-3 text-xs text-gray-500 whitespace-pre-wrap break-all max-h-32 overflow-y-auto bg-gray-50 rounded-lg p-2">{captureStatus}</pre>}
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+        {captureStatus && <pre className="mt-3 text-xs text-gray-500 whitespace-pre-wrap break-all max-h-32 overflow-y-auto bg-gray-50 rounded-lg p-2">{captureStatus}</pre>}
+      </BottomSheet>
 
       {/* Category Picker */}
       <CategoryPicker
@@ -851,78 +841,31 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
         onSelect={setEditCategory}
       />
 
+      {/* Manual Category Picker */}
+      <CategoryPicker
+        open={showManualCatPicker}
+        onClose={() => setShowManualCatPicker(false)}
+        categories={categories}
+        selected={manualCategory}
+        onSelect={setManualCategory}
+      />
+
       {/* Edit Date/Time Picker */}
-      <AnimatePresence>
-        {showEditDatePicker && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowEditDatePicker(false)}
-            />
-            <motion.div
-              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 28, stiffness: 300 }}
-              className="fixed inset-x-0 bottom-0 bg-white rounded-t-3xl z-50 max-w-md mx-auto"
-              style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 16px)" }}
-            >
-              <div className="p-5">
-                <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-4" />
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold">Date & Time</h2>
-                  <button onClick={() => setShowEditDatePicker(false)} className="p-1.5 hover:bg-gray-100 rounded-full">
-                    <X size={18} />
-                  </button>
-                </div>
+      <DateTimePickerSheet
+        open={showEditDatePicker}
+        onClose={() => setShowEditDatePicker(false)}
+        value={editDate}
+        onChange={setEditDate}
+      />
 
-                <Calendar
-                  selected={editDate}
-                  onSelect={(d) => {
-                    const next = new Date(editDate);
-                    next.setFullYear(d.getFullYear(), d.getMonth(), d.getDate());
-                    setEditDate(next);
-                  }}
-                />
+      {/* Manual Add Date/Time Picker */}
+      <DateTimePickerSheet
+        open={showManualDatePicker}
+        onClose={() => setShowManualDatePicker(false)}
+        value={manualDate}
+        onChange={setManualDate}
+      />
 
-                <div className="mt-4 flex items-center justify-between gap-3 px-1">
-                  <span className="text-sm font-medium text-gray-600">Time</span>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number" min={0} max={23} inputMode="numeric"
-                      value={String(editDate.getHours()).padStart(2, "0")}
-                      onChange={(e) => {
-                        const h = Math.max(0, Math.min(23, parseInt(e.target.value || "0", 10)));
-                        const next = new Date(editDate);
-                        next.setHours(h);
-                        setEditDate(next);
-                      }}
-                      className="w-14 h-11 text-center bg-gray-50 rounded-lg text-base font-semibold outline-none focus:ring-2 focus:ring-[#4169e1]/20"
-                    />
-                    <span className="text-base font-semibold text-gray-400">:</span>
-                    <input
-                      type="number" min={0} max={59} inputMode="numeric"
-                      value={String(editDate.getMinutes()).padStart(2, "0")}
-                      onChange={(e) => {
-                        const m = Math.max(0, Math.min(59, parseInt(e.target.value || "0", 10)));
-                        const next = new Date(editDate);
-                        next.setMinutes(m);
-                        setEditDate(next);
-                      }}
-                      className="w-14 h-11 text-center bg-gray-50 rounded-lg text-base font-semibold outline-none focus:ring-2 focus:ring-[#4169e1]/20"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => setShowEditDatePicker(false)}
-                  className="w-full mt-4 h-11 bg-[#4169e1] text-white rounded-xl text-sm font-medium active:bg-[#3151c1] transition-colors touch-manipulation"
-                >
-                  Done
-                </button>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

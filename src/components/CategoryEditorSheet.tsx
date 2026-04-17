@@ -55,8 +55,7 @@ export default function CategoryEditorSheet({ open, onClose, initial, title, sub
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Category name"
-          className="flex-1 h-11 px-3 bg-gray-50 rounded-xl text-[15px] outline-none focus:ring-2 focus:ring-[#4169e1]/20"
-          autoFocus
+          className="flex-1 h-11 px-3 bg-gray-50 rounded-xl text-base outline-none focus:ring-2 focus:ring-[#4169e1]/20"
         />
       </div>
 

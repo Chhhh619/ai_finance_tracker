@@ -4,6 +4,7 @@ import { Search, CalendarDays, X, ChevronDown, ChevronLeft, ChevronRight, Check,
 import Calendar, { toKey } from "../components/Calendar";
 import CategoryPicker from "../components/CategoryPicker";
 import BottomSheet from "../components/BottomSheet";
+import DateTimePickerSheet from "../components/DateTimePickerSheet";
 import Toast from "../components/Toast";
 import { exportTransactionsXLSX, exportTransactionsCSV, exportFilename } from "../lib/export";
 import type { Category, Transaction } from "../types";
@@ -429,7 +430,7 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
         <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
         <input
           type="search"
-          className="w-full h-11 pl-10 pr-4 bg-gray-50 rounded-xl text-[15px] outline-none focus:ring-2 focus:ring-[#4169e1]/20"
+          className="w-full h-11 pl-10 pr-4 bg-gray-50 rounded-xl text-base outline-none focus:ring-2 focus:ring-[#4169e1]/20"
           placeholder="Search merchant..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -687,59 +688,12 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
       />
 
       {/* Edit Date/Time Picker */}
-      <BottomSheet open={showEditDatePicker} onClose={() => setShowEditDatePicker(false)}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Date & Time</h2>
-          <button onClick={() => setShowEditDatePicker(false)} className="p-1.5 hover:bg-gray-100 rounded-full">
-            <X size={18} />
-          </button>
-        </div>
-
-        <Calendar
-          selected={editDate}
-          onSelect={(d) => {
-            const next = new Date(editDate);
-            next.setFullYear(d.getFullYear(), d.getMonth(), d.getDate());
-            setEditDate(next);
-          }}
-        />
-
-        <div className="mt-4 flex items-center justify-between gap-3 px-1">
-          <span className="text-sm font-medium text-gray-600">Time</span>
-          <div className="flex items-center gap-2">
-            <input
-              type="number" min={0} max={23} inputMode="numeric"
-              value={String(editDate.getHours()).padStart(2, "0")}
-              onChange={(e) => {
-                const h = Math.max(0, Math.min(23, parseInt(e.target.value || "0", 10)));
-                const next = new Date(editDate);
-                next.setHours(h);
-                setEditDate(next);
-              }}
-              className="w-14 h-11 text-center bg-gray-50 rounded-lg text-base font-semibold outline-none focus:ring-2 focus:ring-[#4169e1]/20"
-            />
-            <span className="text-base font-semibold text-gray-400">:</span>
-            <input
-              type="number" min={0} max={59} inputMode="numeric"
-              value={String(editDate.getMinutes()).padStart(2, "0")}
-              onChange={(e) => {
-                const m = Math.max(0, Math.min(59, parseInt(e.target.value || "0", 10)));
-                const next = new Date(editDate);
-                next.setMinutes(m);
-                setEditDate(next);
-              }}
-              className="w-14 h-11 text-center bg-gray-50 rounded-lg text-base font-semibold outline-none focus:ring-2 focus:ring-[#4169e1]/20"
-            />
-          </div>
-        </div>
-
-        <button
-          onClick={() => setShowEditDatePicker(false)}
-          className="w-full mt-4 h-11 bg-[#4169e1] text-white rounded-xl text-sm font-medium active:bg-[#3151c1] transition-colors touch-manipulation"
-        >
-          Done
-        </button>
-      </BottomSheet>
+      <DateTimePickerSheet
+        open={showEditDatePicker}
+        onClose={() => setShowEditDatePicker(false)}
+        value={editDate}
+        onChange={setEditDate}
+      />
 
       {/* Source Filter Picker */}
       <BottomSheet open={showSourcePicker} onClose={() => setShowSourcePicker(false)}>
