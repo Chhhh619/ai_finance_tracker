@@ -3,12 +3,32 @@ import { fetchSettings, updateSettings, fetchTransactions } from "../lib/api";
 import { signOut, registerPasskey } from "../lib/auth";
 import { supabase } from "../lib/supabase";
 import { getQueue, flushQueue } from "../lib/offline-queue";
-import { LogOut, Fingerprint, Download, RefreshCw, ChevronRight, Copy, Check, FileSpreadsheet, FileText, Sparkles, ExternalLink } from "lucide-react";
+import { LogOut, Fingerprint, Download, RefreshCw, ChevronRight, Copy, Check, FileSpreadsheet, FileText, Sparkles, ExternalLink, CalendarDays } from "lucide-react";
 import { SHORTCUT_ICLOUD_URL } from "../lib/constants";
 import BottomSheet from "../components/BottomSheet";
+import DateSettingsSheet from "../components/DateSettingsSheet";
 import { exportTransactionsXLSX, exportTransactionsCSV, exportFilename } from "../lib/export";
 import { cn } from "../lib/utils";
 import type { DuplicateHandling, UserSettings } from "../types";
+
+const WEEK_DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+function ordinal(n: number): string {
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1: return `${n}st`;
+    case 2: return `${n}nd`;
+    case 3: return `${n}rd`;
+    default: return `${n}th`;
+  }
+}
+
+interface SettingsPageProps {
+  monthStartDay: number;
+  weekStartDay: number;
+  onSetCycleStart: (month: number, week: number) => void;
+}
 
 const duplicateOptions: { value: DuplicateHandling; label: string; desc: string }[] = [
   { value: "expenses_only", label: "Expenses only", desc: "Only record the expense side of transfers" },
@@ -16,7 +36,7 @@ const duplicateOptions: { value: DuplicateHandling; label: string; desc: string 
   { value: "smart_merge", label: "Smart merge", desc: "Deduplicate matching transfer amounts" },
 ];
 
-export default function SettingsPage() {
+export default function SettingsPage({ monthStartDay, weekStartDay, onSetCycleStart }: SettingsPageProps) {
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [status, setStatus] = useState("");
   const [userEmail, setUserEmail] = useState("");
@@ -24,6 +44,7 @@ export default function SettingsPage() {
   const [copied, setCopied] = useState(false);
   const [showDupPicker, setShowDupPicker] = useState(false);
   const [showExportPicker, setShowExportPicker] = useState(false);
+  const [showDateSettings, setShowDateSettings] = useState(false);
 
   useEffect(() => {
     void fetchSettings().then(setSettings);
@@ -127,6 +148,27 @@ export default function SettingsPage() {
         </button>
       </section>
 
+      {/* Date Cycle */}
+      <section className="mb-6">
+        <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Date Cycle</h2>
+        <p className="text-xs text-gray-400 mb-2">When your monthly and weekly cycles start.</p>
+        <button
+          onClick={() => setShowDateSettings(true)}
+          className="w-full flex items-center justify-between gap-3 px-4 py-3.5 bg-gray-50 rounded-2xl active:bg-gray-100 transition-colors"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <CalendarDays size={18} className="text-gray-500 shrink-0" />
+            <div className="min-w-0 text-left">
+              <div className="text-[15px] font-medium">Date Settings</div>
+              <div className="text-xs text-gray-500 truncate">
+                Starts {ordinal(monthStartDay)} of every month · {WEEK_DAY_NAMES[weekStartDay]}
+              </div>
+            </div>
+          </div>
+          <ChevronRight size={16} className="text-gray-300 shrink-0" />
+        </button>
+      </section>
+
       {/* API Key */}
       <section className="mb-6">
         <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Your Unique Key</h2>
@@ -224,6 +266,14 @@ export default function SettingsPage() {
           ))}
         </div>
       </BottomSheet>
+
+      <DateSettingsSheet
+        open={showDateSettings}
+        onClose={() => setShowDateSettings(false)}
+        monthStartDay={monthStartDay}
+        weekStartDay={weekStartDay}
+        onSave={onSetCycleStart}
+      />
 
       <BottomSheet open={showExportPicker} onClose={() => setShowExportPicker(false)}>
         <h2 className="text-lg font-semibold mb-4">Export Transactions</h2>

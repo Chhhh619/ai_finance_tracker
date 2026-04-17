@@ -145,7 +145,7 @@ export async function fetchSettings(): Promise<UserSettings> {
   return data;
 }
 
-export async function updateSettings(updates: Partial<Pick<UserSettings, "display_name" | "duplicate_handling" | "default_currency" | "ai_model" | "categories_order">>): Promise<UserSettings> {
+export async function updateSettings(updates: Partial<Pick<UserSettings, "display_name" | "duplicate_handling" | "default_currency" | "ai_model" | "categories_order" | "month_start_day" | "week_start_day">>): Promise<UserSettings> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
 

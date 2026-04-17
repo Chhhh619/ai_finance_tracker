@@ -16,6 +16,8 @@ import type { Category } from "./types";
 function AppShell() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [displayName, setDisplayName] = useState("Friend");
+  const [monthStartDay, setMonthStartDay] = useState(1);
+  const [weekStartDay, setWeekStartDay] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
   const [showShortcutOnboarding, setShowShortcutOnboarding] = useState(false);
 
@@ -32,6 +34,8 @@ function AppShell() {
     void loadCategories();
     void fetchSettings().then((s) => {
       if (s.display_name) setDisplayName(s.display_name);
+      setMonthStartDay(s.month_start_day ?? 1);
+      setWeekStartDay(s.week_start_day ?? 0);
     }).catch(() => {});
     setRefreshKey((k) => k + 1);
   }, [loadCategories]);
@@ -71,6 +75,16 @@ function AppShell() {
     }
   }, []);
 
+  const handleSetCycleStart = useCallback(async (month: number, week: number) => {
+    setMonthStartDay(month);
+    setWeekStartDay(week);
+    try {
+      await updateSettings({ month_start_day: month, week_start_day: week });
+    } catch {
+      // keep local values even if DB update fails
+    }
+  }, []);
+
   return (
     <div className="max-w-md mx-auto min-h-screen bg-white safe-top pb-20">
       <div>
@@ -84,12 +98,15 @@ function AppShell() {
                 onDataChanged={handleDataChanged}
                 displayName={displayName}
                 onSetName={handleSetName}
+                monthStartDay={monthStartDay}
+                weekStartDay={weekStartDay}
+                onSetCycleStart={handleSetCycleStart}
               />
             }
           />
-          <Route path="/transactions" element={<TransactionsPage categories={categories} />} />
+          <Route path="/transactions" element={<TransactionsPage categories={categories} monthStartDay={monthStartDay} weekStartDay={weekStartDay} />} />
           <Route path="/categories" element={<CategoriesPage categories={categories} onCategoriesChanged={loadCategories} />} />
-          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/settings" element={<SettingsPage monthStartDay={monthStartDay} weekStartDay={weekStartDay} onSetCycleStart={handleSetCycleStart} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
