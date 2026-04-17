@@ -10,3 +10,6 @@ major_version = 15
 [auth]
 enabled = true
 site_url = "http://localhost:5173"
+
+[functions.ingest]
+verify_jwt = false
