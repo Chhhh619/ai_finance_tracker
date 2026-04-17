@@ -3,11 +3,13 @@ import { AnimatePresence, motion } from "motion/react";
 import { Plus, X, Image as ImageIcon, CalendarDays } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { fetchTransactions, createManualTransaction, updateTransaction, deleteTransaction } from "../lib/api";
+import { getDayRange, getMonthRange, getWeekRange } from "../lib/date-cycle";
 import { supabase } from "../lib/supabase";
 import { addToQueue, getQueue } from "../lib/offline-queue";
 import GradientPieChart from "../components/GradientPieChart";
 import CategoryPicker from "../components/CategoryPicker";
 import DateTimePickerSheet from "../components/DateTimePickerSheet";
+import DateSettingsSheet from "../components/DateSettingsSheet";
 import BottomSheet from "../components/BottomSheet";
 import type { Category, Transaction } from "../types";
 
@@ -30,16 +32,20 @@ interface HomePageProps {
   onDataChanged: () => void;
   displayName: string;
   onSetName: (name: string) => void;
+  monthStartDay: number;
+  weekStartDay: number;
+  onSetCycleStart: (month: number, week: number) => void;
 }
 
 type TimePeriod = "day" | "week" | "month";
 
-export default function HomePage({ categories, onDataChanged, displayName, onSetName }: HomePageProps) {
+export default function HomePage({ categories, onDataChanged, displayName, onSetName, monthStartDay, weekStartDay, onSetCycleStart }: HomePageProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [total, setTotal] = useState(0);
   const [period, setPeriod] = useState<TimePeriod>("month");
   const [showChart, setShowChart] = useState(false);
   const [showPeriodPicker, setShowPeriodPicker] = useState(false);
+  const [showDateSettings, setShowDateSettings] = useState(false);
   const [showNameDialog, setShowNameDialog] = useState(false);
   const [nameInput, setNameInput] = useState(displayName);
   const [showCapture, setShowCapture] = useState(false);
@@ -141,18 +147,12 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
 
   const getDateRange = useCallback((p: TimePeriod): [string, string] => {
     const now = new Date();
-    let from: Date;
-    if (p === "day") {
-      from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    } else if (p === "week") {
-      const dayOfWeek = now.getDay();
-      from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek);
-    } else {
-      from = new Date(now.getFullYear(), now.getMonth(), 1);
-    }
-    const to = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+    const [from, to] =
+      p === "day" ? getDayRange(now) :
+      p === "week" ? getWeekRange(now, weekStartDay) :
+      getMonthRange(now, monthStartDay);
     return [from.toISOString(), to.toISOString()];
-  }, []);
+  }, [monthStartDay, weekStartDay]);
 
   const loadData = useCallback(async () => {
     try {
@@ -614,27 +614,59 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
 
       {/* ─── Time Period Picker ─── */}
       <BottomSheet open={showPeriodPicker} onClose={() => setShowPeriodPicker(false)}>
-        <h2 className="text-lg font-semibold mb-4">Time Period</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Time Period</h2>
+          <button
+            onClick={() => { setShowPeriodPicker(false); setShowDateSettings(true); }}
+            className="p-2 -mr-1 rounded-full active:bg-gray-100 transition-colors touch-manipulation"
+            aria-label="Date settings"
+          >
+            <CalendarDays size={18} className="text-gray-600" />
+          </button>
+        </div>
         <div className="space-y-2">
-          {([
-            { value: "day" as const, label: "Today" },
-            { value: "week" as const, label: "This Week" },
-            { value: "month" as const, label: "This Month" },
-          ]).map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => { setPeriod(opt.value); setShowPeriodPicker(false); }}
-              className={`w-full py-3.5 px-4 rounded-2xl text-left text-[15px] font-medium transition-all ${
-                period === opt.value
-                  ? "bg-[#4169e1] text-white"
-                  : "bg-gray-50 text-gray-700 active:bg-gray-100"
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
+          {(() => {
+            const now = new Date();
+            const fmtDay = (d: Date) => d.toLocaleDateString("en-MY", { day: "numeric", month: "short" });
+            const [weekFrom, weekTo] = getWeekRange(now, weekStartDay);
+            const [monthFrom, monthTo] = getMonthRange(now, monthStartDay);
+            const monthRange =
+              monthFrom.getMonth() === monthTo.getMonth() && monthFrom.getFullYear() === monthTo.getFullYear()
+                ? `${monthFrom.getDate()} – ${monthTo.getDate()} ${monthFrom.toLocaleDateString("en-MY", { month: "short" })}`
+                : `${fmtDay(monthFrom)} – ${fmtDay(monthTo)}`;
+            return [
+              { value: "day" as const, label: "Today", range: fmtDay(now) },
+              { value: "week" as const, label: "This Week", range: `${fmtDay(weekFrom)} – ${fmtDay(weekTo)}` },
+              { value: "month" as const, label: "This Month", range: monthRange },
+            ];
+          })().map((opt) => {
+            const active = period === opt.value;
+            return (
+              <button
+                key={opt.value}
+                onClick={() => { setPeriod(opt.value); setShowPeriodPicker(false); }}
+                className={`w-full py-3 px-4 rounded-2xl text-left flex items-center justify-between gap-3 transition-all ${
+                  active
+                    ? "bg-[#4169e1] text-white"
+                    : "bg-gray-50 text-gray-700 active:bg-gray-100"
+                }`}
+              >
+                <span className="text-[15px] font-medium">{opt.label}</span>
+                <span className={`text-xs ${active ? "text-white/75" : "text-gray-400"}`}>{opt.range}</span>
+              </button>
+            );
+          })}
         </div>
       </BottomSheet>
+
+      {/* ─── Date Settings ─── */}
+      <DateSettingsSheet
+        open={showDateSettings}
+        onClose={() => setShowDateSettings(false)}
+        monthStartDay={monthStartDay}
+        weekStartDay={weekStartDay}
+        onSave={onSetCycleStart}
+      />
 
       {/* ─── Chart Modal (amount tap) ─── */}
       <AnimatePresence>

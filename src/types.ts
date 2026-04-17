@@ -37,4 +37,6 @@ export interface UserSettings {
   ai_model: string;
   categories_order: string[] | null;
   api_key: string;
+  month_start_day: number;
+  week_start_day: number;
 }

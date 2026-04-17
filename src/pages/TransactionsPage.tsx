@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchTransactions, updateTransaction, deleteTransaction, type TransactionFilters } from "../lib/api";
 import { Search, CalendarDays, X, ChevronDown, ChevronLeft, ChevronRight, Check, Download, FileSpreadsheet, FileText, Trash2 } from "lucide-react";
 import Calendar, { toKey } from "../components/Calendar";
+import { getMonthRange, getWeekRange } from "../lib/date-cycle";
 import CategoryPicker from "../components/CategoryPicker";
 import BottomSheet from "../components/BottomSheet";
 import DateTimePickerSheet from "../components/DateTimePickerSheet";
@@ -29,9 +30,11 @@ type DateFilterMode = "all" | "day" | "week" | "month";
 
 interface TransactionsPageProps {
   categories: Category[];
+  monthStartDay: number;
+  weekStartDay: number;
 }
 
-export default function TransactionsPage({ categories }: TransactionsPageProps) {
+export default function TransactionsPage({ categories, monthStartDay, weekStartDay }: TransactionsPageProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -87,9 +90,7 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
       };
     }
     if (dateMode === "week") {
-      const dayOfWeek = d.getDay();
-      const from = new Date(d.getFullYear(), d.getMonth(), d.getDate() - dayOfWeek);
-      const to = new Date(d.getFullYear(), d.getMonth(), d.getDate() + (6 - dayOfWeek), 23, 59, 59);
+      const [from, to] = getWeekRange(d, weekStartDay);
       return {
         from: from.toISOString(),
         to: to.toISOString(),
@@ -97,14 +98,13 @@ export default function TransactionsPage({ categories }: TransactionsPageProps) 
       };
     }
     // month
-    const from = new Date(d.getFullYear(), d.getMonth(), 1);
-    const to = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59);
-    return {
-      from: from.toISOString(),
-      to: to.toISOString(),
-      label: d.toLocaleDateString("en-MY", { month: "long", year: "numeric" }),
-    };
-  }, [dateMode, selectedDate]);
+    const [from, to] = getMonthRange(d, monthStartDay);
+    const sameMonth = from.getMonth() === to.getMonth() && from.getFullYear() === to.getFullYear();
+    const label = sameMonth
+      ? `${from.getDate()} – ${to.getDate()} ${from.toLocaleDateString("en-MY", { month: "short" })}`
+      : `${from.toLocaleDateString("en-MY", { day: "numeric", month: "short" })} – ${to.toLocaleDateString("en-MY", { day: "numeric", month: "short" })}`;
+    return { from: from.toISOString(), to: to.toISOString(), label };
+  }, [dateMode, selectedDate, monthStartDay, weekStartDay]);
 
   const loadTransactions = useCallback(async (reset = false) => {
     setLoading(true);
