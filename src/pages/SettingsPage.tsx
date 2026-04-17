@@ -7,6 +7,7 @@ import { LogOut, Fingerprint, Download, RefreshCw, ChevronRight, Copy, Check, Fi
 import { SHORTCUT_ICLOUD_URL } from "../lib/constants";
 import BottomSheet from "../components/BottomSheet";
 import { exportTransactionsXLSX, exportTransactionsCSV, exportFilename } from "../lib/export";
+import { cn } from "../lib/utils";
 import type { DuplicateHandling, UserSettings } from "../types";
 
 const duplicateOptions: { value: DuplicateHandling; label: string; desc: string }[] = [
@@ -62,9 +63,13 @@ export default function SettingsPage() {
 
   const handleCopyKey = async () => {
     if (!settings?.api_key) return;
-    await navigator.clipboard.writeText(settings.api_key);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(settings.api_key);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (err) {
+      console.error("Failed to copy key:", err);
+    }
   };
 
   if (!settings) {
@@ -124,19 +129,24 @@ export default function SettingsPage() {
 
       {/* API Key */}
       <section className="mb-6">
-        <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">API Key</h2>
-        <p className="text-xs text-gray-400 mb-2">Use this in your iOS Shortcut's Authorization header.</p>
-        <div className="flex items-center gap-2 min-w-0">
-          <code className="flex-1 min-w-0 px-3 py-2.5 bg-gray-50 rounded-xl text-xs text-gray-600 font-mono truncate block overflow-hidden">
-            {settings.api_key}
-          </code>
-          <button
-            onClick={() => void handleCopyKey()}
-            className="p-2.5 bg-gray-50 rounded-xl active:bg-gray-100 transition-colors shrink-0"
-          >
-            {copied ? <Check size={16} className="text-emerald-500" /> : <Copy size={16} className="text-gray-500" />}
-          </button>
-        </div>
+        <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Your Unique Key</h2>
+        <p className="text-xs text-gray-400 mb-3">Paste this into your iOS Shortcut when it asks for the key.</p>
+        <button
+          onClick={() => void handleCopyKey()}
+          disabled={copied}
+          className={cn(
+            "relative w-full h-12 rounded-2xl font-medium text-[15px] flex items-center justify-center gap-2.5 transition-colors disabled:opacity-100",
+            copied ? "bg-emerald-50 text-emerald-600" : "bg-[#4169e1] text-white active:bg-[#3558c7]"
+          )}
+        >
+          <span className={cn("transition-all duration-200", copied ? "scale-100 opacity-100" : "scale-0 opacity-0 absolute")}>
+            <Check size={18} className="stroke-emerald-600" />
+          </span>
+          <span className={cn("transition-all duration-200", copied ? "scale-0 opacity-0 absolute" : "scale-100 opacity-100")}>
+            <Copy size={18} />
+          </span>
+          {copied ? "Copied!" : "Copy your unique key"}
+        </button>
       </section>
 
       {/* iOS Shortcut Setup */}
