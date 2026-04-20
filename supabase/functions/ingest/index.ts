@@ -1,5 +1,5 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { z } from "https://esm.sh/zod@3";
+import { createClient } from "jsr:@supabase/supabase-js@2";
+import { z } from "npm:zod@3";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -26,12 +26,22 @@ const transactionSchema = z.object({
 
 const llmResponseSchema = z.array(transactionSchema);
 
+function makeRequestId() {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+function log(requestId: string, stage: string, extra?: Record<string, unknown>) {
+  const payload = { requestId, stage, ...(extra ?? {}) };
+  console.log(JSON.stringify(payload));
+}
+
 async function callGeminiFlash(
   text: string | undefined,
   imageBase64: string | undefined,
   categoryNames: string[],
   apiKey: string,
-  source: string
+  source: string,
+  requestId: string
 ): Promise<z.infer<typeof llmResponseSchema> | null> {
   const systemPrompt = [
     "You are a financial transaction extractor for a Malaysian budgeting app.",
@@ -81,217 +91,258 @@ async function callGeminiFlash(
 
   if (parts.length === 0) return null;
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ parts }],
-        generationConfig: {
-          temperature: 0.1,
-          responseMimeType: "application/json",
-          thinking_config: { thinking_budget: 0 },
-        },
-      }),
-    }
-  );
+  log(requestId, "gemini_fetch_start", {
+    hasText: Boolean(text),
+    textLen: text?.length ?? 0,
+    hasImage: Boolean(imageBase64),
+    imageBase64Len: imageBase64?.length ?? 0,
+    categoryCount: categoryNames.length,
+  });
+  const geminiStart = Date.now();
+
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: systemPrompt }] },
+          contents: [{ parts }],
+          generationConfig: {
+            temperature: 0.1,
+            responseMimeType: "application/json",
+            thinking_config: { thinking_budget: 0 },
+          },
+        }),
+      }
+    );
+  } catch (e) {
+    log(requestId, "gemini_fetch_threw", { error: String(e), ms: Date.now() - geminiStart });
+    return { transactions: null, debug: { error: "Gemini fetch threw", detail: String(e) } };
+  }
+
+  const geminiMs = Date.now() - geminiStart;
+  log(requestId, "gemini_fetch_done", { status: response.status, ms: geminiMs });
 
   if (!response.ok) {
     const errText = await response.text();
-    console.error("Gemini API error:", response.status, errText);
+    log(requestId, "gemini_error", { status: response.status, body: errText.slice(0, 500) });
     return { transactions: null, debug: { error: `Gemini ${response.status}`, detail: errText } };
   }
 
   const data = await response.json();
   const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!content) return { transactions: null, debug: { error: "No content in Gemini response", raw: JSON.stringify(data).slice(0, 500) } };
+  if (!content) {
+    log(requestId, "gemini_no_content", { raw: JSON.stringify(data).slice(0, 500) });
+    return { transactions: null, debug: { error: "No content in Gemini response", raw: JSON.stringify(data).slice(0, 500) } };
+  }
 
   try {
     const parsed = JSON.parse(content);
     const validated = llmResponseSchema.safeParse(parsed);
     if (!validated.success) {
-      console.error("Zod validation failed:", validated.error.issues);
+      log(requestId, "gemini_validation_failed", { issues: validated.error.issues, output: content.slice(0, 500) });
       return { transactions: null, debug: { error: "Validation failed", llmOutput: content, zodErrors: validated.error.issues } };
     }
+    log(requestId, "gemini_parsed", { count: validated.data.length });
     return { transactions: validated.data, debug: { llmOutput: content } };
   } catch (e) {
+    log(requestId, "gemini_parse_failed", { error: String(e), output: content.slice(0, 500) });
     return { transactions: null, debug: { error: "JSON parse failed", llmOutput: content, parseError: String(e) } };
   }
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
+  const requestId = makeRequestId();
+  const startedAt = Date.now();
 
-  if (req.method !== "POST") {
-    return new Response(JSON.stringify({ status: "error", message: "Method not allowed" }), {
-      status: 405,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+  const jsonResponse = (status: number, payload: Record<string, unknown>) =>
+    new Response(JSON.stringify({ requestId, ...payload }), {
+      status,
+      headers: { ...corsHeaders, "Content-Type": "application/json", "x-request-id": requestId },
     });
-  }
 
-  const authHeader = req.headers.get("authorization");
-  const apiKey = authHeader?.replace("Bearer ", "");
-  if (!apiKey) {
-    return new Response(JSON.stringify({ status: "error", message: "Missing API key" }), {
-      status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
-
-  if (!geminiApiKey) {
-    return new Response(JSON.stringify({ status: "error", message: "Gemini API key not configured" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-
-  const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-  const { data: settings, error: settingsError } = await supabase
-    .from("user_settings")
-    .select("*")
-    .eq("api_key", apiKey)
-    .single();
-
-  if (settingsError || !settings) {
-    return new Response(JSON.stringify({ status: "error", message: "Invalid API key" }), {
-      status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-
-  const userId = settings.user_id;
-
-  let body: z.infer<typeof requestSchema>;
   try {
-    const raw = await req.json();
-    const parsed = requestSchema.safeParse(raw);
-    if (!parsed.success) {
-      return new Response(JSON.stringify({ status: "error", message: "Invalid request body", details: parsed.error.issues }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    body = parsed.data;
-  } catch {
-    return new Response(JSON.stringify({ status: "error", message: "Invalid JSON" }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    log(requestId, "request_received", {
+      method: req.method,
+      url: req.url,
+      contentType: req.headers.get("content-type"),
+      contentLength: req.headers.get("content-length"),
+      userAgent: req.headers.get("user-agent"),
     });
-  }
 
-  if (!body.text && !body.image) {
-    return new Response(JSON.stringify({ status: "error", message: "Either text or image is required" }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-
-  const { data: categories } = await supabase
-    .from("categories")
-    .select("id, name")
-    .eq("user_id", userId);
-
-  const categoryNames = (categories ?? []).map((c: { name: string }) => c.name);
-  const categoryMap = new Map((categories ?? []).map((c: { id: string; name: string }) => [c.name.toLowerCase(), c.id]));
-
-  const geminiResult = await callGeminiFlash(body.text, body.image, categoryNames, geminiApiKey, body.source);
-  const transactions = geminiResult.transactions;
-  const debug = geminiResult.debug;
-
-  if (!transactions || transactions.length === 0) {
-    return new Response(JSON.stringify({ status: "empty", message: "🔍 No transaction found in this capture", debug }), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-
-  let filtered = transactions;
-  if (settings.duplicate_handling === "expenses_only") {
-    const amounts = new Map<number, typeof transactions>();
-    for (const t of transactions) {
-      const existing = amounts.get(t.amount) ?? [];
-      existing.push(t);
-      amounts.set(t.amount, existing);
+    if (req.method === "OPTIONS") {
+      return new Response("ok", { headers: { ...corsHeaders, "x-request-id": requestId } });
     }
 
-    filtered = [];
-    for (const [, group] of amounts) {
-      const hasExpense = group.some(t => t.direction === "expense");
-      const hasIncome = group.some(t => t.direction === "income");
-      if (hasExpense && hasIncome) {
-        filtered.push(...group.filter(t => t.direction === "expense"));
-      } else {
-        filtered.push(...group);
+    if (req.method !== "POST") {
+      log(requestId, "method_not_allowed", { method: req.method });
+      return jsonResponse(405, { status: "error", message: "Method not allowed" });
+    }
+
+    const authHeader = req.headers.get("authorization");
+    const apiKey = authHeader?.replace("Bearer ", "");
+    if (!apiKey) {
+      log(requestId, "auth_missing");
+      return jsonResponse(401, { status: "error", message: "Missing API key" });
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
+
+    if (!geminiApiKey) {
+      log(requestId, "gemini_key_not_configured");
+      return jsonResponse(500, { status: "error", message: "Gemini API key not configured" });
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    const { data: settings, error: settingsError } = await supabase
+      .from("user_settings")
+      .select("*")
+      .eq("api_key", apiKey)
+      .single();
+
+    if (settingsError || !settings) {
+      log(requestId, "auth_invalid", { error: settingsError?.message });
+      return jsonResponse(401, { status: "error", message: "Invalid API key" });
+    }
+
+    const userId = settings.user_id;
+    log(requestId, "auth_ok", { userId });
+
+    let body: z.infer<typeof requestSchema>;
+    try {
+      const raw = await req.json();
+      const parsed = requestSchema.safeParse(raw);
+      if (!parsed.success) {
+        log(requestId, "body_invalid", { issues: parsed.error.issues });
+        return jsonResponse(400, { status: "error", message: "Invalid request body", details: parsed.error.issues });
+      }
+      body = parsed.data;
+    } catch (e) {
+      log(requestId, "body_parse_failed", { error: String(e) });
+      return jsonResponse(400, { status: "error", message: "Invalid JSON" });
+    }
+
+    if (!body.text && !body.image) {
+      log(requestId, "body_empty");
+      return jsonResponse(400, { status: "error", message: "Either text or image is required" });
+    }
+
+    log(requestId, "body_ok", {
+      hasText: Boolean(body.text),
+      textLen: body.text?.length ?? 0,
+      hasImage: Boolean(body.image),
+      imageLen: body.image?.length ?? 0,
+      source: body.source,
+    });
+
+    const { data: categories, error: categoriesError } = await supabase
+      .from("categories")
+      .select("id, name")
+      .eq("user_id", userId);
+
+    if (categoriesError) {
+      log(requestId, "categories_fetch_failed", { error: categoriesError.message });
+    }
+
+    const categoryNames = (categories ?? []).map((c: { name: string }) => c.name);
+    const categoryMap = new Map((categories ?? []).map((c: { id: string; name: string }) => [c.name.toLowerCase(), c.id]));
+
+    const geminiResult = await callGeminiFlash(body.text, body.image, categoryNames, geminiApiKey, body.source, requestId);
+    const transactions = geminiResult.transactions;
+    const debug = geminiResult.debug;
+
+    if (!transactions || transactions.length === 0) {
+      log(requestId, "empty_result", { totalMs: Date.now() - startedAt });
+      return jsonResponse(200, { status: "empty", message: "🔍 No transaction found in this capture", debug });
+    }
+
+    let filtered = transactions;
+    if (settings.duplicate_handling === "expenses_only") {
+      const amounts = new Map<number, typeof transactions>();
+      for (const t of transactions) {
+        const existing = amounts.get(t.amount) ?? [];
+        existing.push(t);
+        amounts.set(t.amount, existing);
+      }
+
+      filtered = [];
+      for (const [, group] of amounts) {
+        const hasExpense = group.some(t => t.direction === "expense");
+        const hasIncome = group.some(t => t.direction === "income");
+        if (hasExpense && hasIncome) {
+          filtered.push(...group.filter(t => t.direction === "expense"));
+        } else {
+          filtered.push(...group);
+        }
+      }
+    } else if (settings.duplicate_handling === "smart_merge") {
+      const seen = new Set<number>();
+      filtered = [];
+      for (const t of transactions) {
+        if (t.direction === "income" && seen.has(t.amount)) continue;
+        if (t.direction === "expense") seen.add(t.amount);
+        filtered.push(t);
       }
     }
-  } else if (settings.duplicate_handling === "smart_merge") {
-    const seen = new Set<number>();
-    filtered = [];
-    for (const t of transactions) {
-      if (t.direction === "income" && seen.has(t.amount)) continue;
-      if (t.direction === "expense") seen.add(t.amount);
-      filtered.push(t);
+
+    log(requestId, "filtered", { before: transactions.length, after: filtered.length, mode: settings.duplicate_handling });
+
+    const inserts = filtered.map((t) => ({
+      user_id: userId,
+      amount: t.amount,
+      currency: "MYR",
+      direction: t.direction,
+      merchant: t.merchant,
+      description: `${t.direction === "expense" ? "Paid" : "Received"} ${t.amount} - ${t.merchant}`,
+      category_id: categoryMap.get(t.category.toLowerCase()) ?? categoryMap.get("others") ?? null,
+      source: body.source === "receipt" ? "receipt" as const : t.source,
+      confidence: t.confidence,
+      raw_text: body.text ?? "(image)",
+      needs_review: t.confidence < 0.7,
+      transaction_at: t.transaction_at ?? body.timestamp ?? new Date().toISOString(),
+    }));
+
+    const { data: inserted, error: insertError } = await supabase
+      .from("transactions")
+      .insert(inserts)
+      .select();
+
+    if (insertError) {
+      log(requestId, "insert_failed", { error: insertError.message, code: insertError.code, details: insertError.details });
+      return jsonResponse(500, { status: "error", message: "❌ Couldn't save — please try again", debug: { error: insertError.message } });
     }
-  }
 
-  const inserts = filtered.map((t) => ({
-    user_id: userId,
-    amount: t.amount,
-    currency: "MYR",
-    direction: t.direction,
-    merchant: t.merchant,
-    description: `${t.direction === "expense" ? "Paid" : "Received"} ${t.amount} - ${t.merchant}`,
-    category_id: categoryMap.get(t.category.toLowerCase()) ?? categoryMap.get("others") ?? null,
-    source: body.source === "receipt" ? "receipt" as const : t.source,
-    confidence: t.confidence,
-    raw_text: body.text ?? "(image)",
-    needs_review: t.confidence < 0.7,
-    transaction_at: t.transaction_at ?? body.timestamp ?? new Date().toISOString(),
-  }));
+    const categoryById = new Map((categories ?? []).map((c: { id: string; name: string }) => [c.id, c.name]));
 
-  const { data: inserted, error: insertError } = await supabase
-    .from("transactions")
-    .insert(inserts)
-    .select();
+    const lines = (inserted ?? []).map((t: { amount: number; merchant: string; direction: string; category_id: string | null; needs_review: boolean }) => {
+      const arrow = t.direction === "expense" ? "−" : "+";
+      const cat = t.category_id ? (categoryById.get(t.category_id) ?? "Others") : "Others";
+      const review = t.needs_review ? " ⚠︎" : "";
+      return `${arrow}RM${Number(t.amount).toFixed(2)} · ${t.merchant} · ${cat}${review}`;
+    });
 
-  if (insertError) {
-    return new Response(JSON.stringify({ status: "error", message: "❌ Couldn't save — please try again" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    const header = inserted && inserted.length > 1
+      ? `✅ Saved ${inserted.length} transactions`
+      : "✅ Saved";
+
+    const message = `${header}\n${lines.join("\n")}`;
+
+    log(requestId, "done", { inserted: inserted?.length ?? 0, totalMs: Date.now() - startedAt });
+
+    return jsonResponse(200, { status: "ok", entries: inserted, message, debug });
+  } catch (e) {
+    const err = e as Error;
+    log(requestId, "unhandled_error", { error: err.message, stack: err.stack, totalMs: Date.now() - startedAt });
+    return jsonResponse(500, {
+      status: "error",
+      message: `❌ Server error — ref ${requestId}`,
+      debug: { error: err.message, stack: err.stack },
     });
   }
-
-  const categoryById = new Map((categories ?? []).map((c: { id: string; name: string }) => [c.id, c.name]));
-
-  const lines = (inserted ?? []).map((t: { amount: number; merchant: string; direction: string; category_id: string | null; needs_review: boolean }) => {
-    const arrow = t.direction === "expense" ? "−" : "+";
-    const cat = t.category_id ? (categoryById.get(t.category_id) ?? "Others") : "Others";
-    const review = t.needs_review ? " ⚠︎" : "";
-    return `${arrow}RM${Number(t.amount).toFixed(2)} · ${t.merchant} · ${cat}${review}`;
-  });
-
-  const header = inserted && inserted.length > 1
-    ? `✅ Saved ${inserted.length} transactions`
-    : "✅ Saved";
-
-  const message = `${header}\n${lines.join("\n")}`;
-
-  return new Response(JSON.stringify({
-    status: "ok",
-    entries: inserted,
-    message,
-    debug,
-  }), {
-    status: 200,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
 });
