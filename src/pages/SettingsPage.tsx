@@ -3,7 +3,7 @@ import { fetchSettings, updateSettings, fetchTransactions } from "../lib/api";
 import { signOut, registerPasskey } from "../lib/auth";
 import { supabase } from "../lib/supabase";
 import { getQueue, flushQueue } from "../lib/offline-queue";
-import { LogOut, Fingerprint, Download, RefreshCw, ChevronRight, Copy, Check, FileSpreadsheet, FileText, Sparkles, ExternalLink, CalendarDays } from "lucide-react";
+import { LogOut, Fingerprint, Download, RefreshCw, ChevronRight, Copy, Check, FileSpreadsheet, FileText, Sparkles, ExternalLink, CalendarDays, PlayCircle } from "lucide-react";
 import { SHORTCUT_ICLOUD_URL } from "../lib/constants";
 import BottomSheet from "../components/BottomSheet";
 import DateSettingsSheet from "../components/DateSettingsSheet";
@@ -28,6 +28,7 @@ interface SettingsPageProps {
   monthStartDay: number;
   weekStartDay: number;
   onSetCycleStart: (month: number, week: number) => void;
+  onStartTour: () => void;
 }
 
 const duplicateOptions: { value: DuplicateHandling; label: string; desc: string }[] = [
@@ -36,7 +37,7 @@ const duplicateOptions: { value: DuplicateHandling; label: string; desc: string 
   { value: "smart_merge", label: "Smart merge", desc: "Deduplicate matching transfer amounts" },
 ];
 
-export default function SettingsPage({ monthStartDay, weekStartDay, onSetCycleStart }: SettingsPageProps) {
+export default function SettingsPage({ monthStartDay, weekStartDay, onSetCycleStart, onStartTour }: SettingsPageProps) {
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [status, setStatus] = useState("");
   const [userEmail, setUserEmail] = useState("");
@@ -88,6 +89,7 @@ export default function SettingsPage({ monthStartDay, weekStartDay, onSetCycleSt
       await navigator.clipboard.writeText(settings.api_key);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
+      window.dispatchEvent(new Event("pocketringgit:key-copied"));
     } catch (err) {
       console.error("Failed to copy key:", err);
     }
@@ -176,6 +178,7 @@ export default function SettingsPage({ monthStartDay, weekStartDay, onSetCycleSt
         <button
           onClick={() => void handleCopyKey()}
           disabled={copied}
+          data-tour-target="copy-key"
           className={cn(
             "relative w-full h-12 rounded-2xl font-medium text-[15px] flex items-center justify-center gap-2.5 transition-colors disabled:opacity-100",
             copied ? "bg-emerald-50 text-emerald-600" : "bg-[#4169e1] text-white active:bg-[#3558c7]"
@@ -198,7 +201,7 @@ export default function SettingsPage({ monthStartDay, weekStartDay, onSetCycleSt
           href={SHORTCUT_ICLOUD_URL}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center justify-between gap-3 px-4 py-3.5 bg-gray-50 rounded-2xl active:bg-gray-100 transition-colors"
+          className="flex items-center justify-between gap-3 px-4 py-3.5 bg-gray-50 rounded-2xl active:bg-gray-100 transition-colors mb-2"
         >
           <div className="flex items-center gap-3 min-w-0">
             <Sparkles size={18} className="text-[#4169e1] shrink-0" />
@@ -209,6 +212,19 @@ export default function SettingsPage({ monthStartDay, weekStartDay, onSetCycleSt
           </div>
           <ExternalLink size={16} className="text-gray-400 shrink-0" />
         </a>
+        <button
+          onClick={onStartTour}
+          className="w-full flex items-center justify-between gap-3 px-4 py-3.5 bg-gray-50 rounded-2xl active:bg-gray-100 transition-colors"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <PlayCircle size={18} className="text-[#4169e1] shrink-0" />
+            <div className="min-w-0 text-left">
+              <div className="text-[15px] font-medium">Tutorial</div>
+              <div className="text-xs text-gray-500">Replay the shortcut walkthrough</div>
+            </div>
+          </div>
+          <ChevronRight size={16} className="text-gray-300 shrink-0" />
+        </button>
       </section>
 
       {/* Offline Queue */}
