@@ -23,6 +23,7 @@ export default function BottomNav() {
             <button
               key={path}
               onClick={() => navigate(path)}
+              data-tour-target={path === "/settings" ? "settings-tab" : undefined}
               className={`flex flex-col items-center gap-0.5 px-4 py-1.5 transition-colors ${
                 active ? "text-[#4169e1]" : "text-gray-400"
               }`}

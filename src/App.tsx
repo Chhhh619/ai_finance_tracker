@@ -7,6 +7,7 @@ import TransactionsPage from "./pages/TransactionsPage";
 import CategoriesPage from "./pages/CategoriesPage";
 import SettingsPage from "./pages/SettingsPage";
 import ShortcutOnboardingModal from "./components/ShortcutOnboardingModal";
+import ShortcutOnboardingTour from "./components/ShortcutOnboardingTour";
 import { fetchCategories, fetchSettings, updateSettings } from "./lib/api";
 import { setupOnlineSync } from "./lib/offline-queue";
 import { onAuthStateChange } from "./lib/auth";
@@ -19,7 +20,8 @@ function AppShell() {
   const [monthStartDay, setMonthStartDay] = useState(1);
   const [weekStartDay, setWeekStartDay] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [showShortcutOnboarding, setShowShortcutOnboarding] = useState(false);
+  const [showShortcutSheet, setShowShortcutSheet] = useState(false);
+  const [showShortcutTour, setShowShortcutTour] = useState(false);
 
   const loadCategories = useCallback(async () => {
     try {
@@ -50,17 +52,26 @@ function AppShell() {
       if (session) {
         loadInitialData();
         if (!localStorage.getItem(SHORTCUT_ONBOARDING_FLAG)) {
-          setShowShortcutOnboarding(true);
+          setShowShortcutSheet(true);
         }
       }
     });
     return unsubscribe;
   }, [loadInitialData]);
 
-  const dismissShortcutOnboarding = useCallback(() => {
+  const dismissShortcutSheet = useCallback(() => {
     localStorage.setItem(SHORTCUT_ONBOARDING_FLAG, "1");
-    setShowShortcutOnboarding(false);
+    setShowShortcutSheet(false);
   }, []);
+
+  const acceptShortcutAndStartTour = useCallback(() => {
+    localStorage.setItem(SHORTCUT_ONBOARDING_FLAG, "1");
+    setShowShortcutSheet(false);
+    setShowShortcutTour(true);
+  }, []);
+
+  const startTour = useCallback(() => setShowShortcutTour(true), []);
+  const dismissTour = useCallback(() => setShowShortcutTour(false), []);
 
   const handleDataChanged = useCallback(() => {
     setRefreshKey((k) => k + 1);
@@ -106,12 +117,17 @@ function AppShell() {
           />
           <Route path="/transactions" element={<TransactionsPage categories={categories} monthStartDay={monthStartDay} weekStartDay={weekStartDay} />} />
           <Route path="/categories" element={<CategoriesPage categories={categories} onCategoriesChanged={loadCategories} />} />
-          <Route path="/settings" element={<SettingsPage monthStartDay={monthStartDay} weekStartDay={weekStartDay} onSetCycleStart={handleSetCycleStart} />} />
+          <Route path="/settings" element={<SettingsPage monthStartDay={monthStartDay} weekStartDay={weekStartDay} onSetCycleStart={handleSetCycleStart} onStartTour={startTour} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
       <BottomNav />
-      <ShortcutOnboardingModal open={showShortcutOnboarding} onClose={dismissShortcutOnboarding} />
+      <ShortcutOnboardingModal
+        open={showShortcutSheet}
+        onClose={dismissShortcutSheet}
+        onPrimaryAction={acceptShortcutAndStartTour}
+      />
+      <ShortcutOnboardingTour open={showShortcutTour} onClose={dismissTour} />
     </div>
   );
 }

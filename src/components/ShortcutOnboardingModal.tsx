@@ -5,9 +5,10 @@ import { SHORTCUT_ICLOUD_URL } from "../lib/constants";
 type Props = {
   open: boolean;
   onClose: () => void;
+  onPrimaryAction: () => void;
 };
 
-export default function ShortcutOnboardingModal({ open, onClose }: Props) {
+export default function ShortcutOnboardingModal({ open, onClose, onPrimaryAction }: Props) {
   return (
     <BottomSheet open={open} onClose={onClose}>
       <div className="flex flex-col items-center text-center mb-5">
@@ -25,7 +26,7 @@ export default function ShortcutOnboardingModal({ open, onClose }: Props) {
         href={SHORTCUT_ICLOUD_URL}
         target="_blank"
         rel="noopener noreferrer"
-        onClick={onClose}
+        onClick={onPrimaryAction}
         className="flex items-center justify-center gap-2 w-full h-12 rounded-xl bg-[#4169e1] text-white text-sm font-semibold active:bg-[#3151c1] transition-colors mb-2"
       >
         Add to Shortcuts <ExternalLink size={16} />
