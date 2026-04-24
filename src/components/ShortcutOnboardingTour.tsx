@@ -407,7 +407,7 @@ function StepHeader({ step, onSkip }: { step: number; onSkip: () => void }) {
     <>
       <div
         className="flex items-center justify-between px-5"
-        style={{ paddingTop: "max(calc(env(safe-area-inset-top, 0px) + 20px), 40px)" }}
+        style={{ paddingTop: "max(env(safe-area-inset-top, 0px), 54px)" }}
       >
         <div className="text-[11px] font-semibold tracking-[0.12em] text-gray-500">
           STEP {step} OF {TOTAL_STEPS}
@@ -456,7 +456,8 @@ function VideoOverlay({ onNext, onSkip }: { onNext: () => void; onSkip: () => vo
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.26 }}
-      className="fixed inset-0 z-[70] bg-white text-[#0B1220] flex flex-col overflow-hidden"
+      className="fixed inset-0 z-[70] bg-white text-[#0B1220] flex flex-col overflow-y-auto overflow-x-hidden"
+      style={{ WebkitOverflowScrolling: "touch" }}
     >
       <StepHeader step={3} onSkip={onSkip} />
 
@@ -473,15 +474,15 @@ function VideoOverlay({ onNext, onSkip }: { onNext: () => void; onSkip: () => vo
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 px-5 py-3 flex flex-col items-center justify-center">
+      <div className="flex-1 min-h-[420px] px-5 pt-4 pb-2 flex flex-col items-center justify-start">
         <div
           onClick={() => setPaused(p => !p)}
           className="relative cursor-pointer overflow-hidden"
           style={{
-            height: "100%",
-            aspectRatio: "9 / 19.5",
-            maxWidth: "100%",
-            borderRadius: 14,
+            width: "100%",
+            maxHeight: "100%",
+            aspectRatio: "9 / 10.4",
+            borderRadius: 10,
             flexShrink: 1,
             minHeight: 0,
           }}
@@ -489,11 +490,14 @@ function VideoOverlay({ onNext, onSkip }: { onNext: () => void; onSkip: () => vo
           <video
             ref={videoRef}
             autoPlay muted loop playsInline
-            poster="/pocketringgitdemo-poster.jpg"
+            poster="/pocketringgitdemo-poster.jpeg"
             onLoadedData={() => setReady(true)}
             onTimeUpdate={onTime}
             style={{
               width: "100%", height: "100%", objectFit: "cover", display: "block",
+              objectPosition: "center top",
+              boxSizing: "border-box",
+              paddingTop: "max(env(safe-area-inset-top, 0px), 54px)",
               opacity: ready ? 1 : 0.0001, transition: "opacity 260ms ease",
             }}
           >
@@ -503,9 +507,14 @@ function VideoOverlay({ onNext, onSkip }: { onNext: () => void; onSkip: () => vo
 
           {!ready && (
             <img
-              src="/pocketringgitdemo-poster.jpg"
+              src="/pocketringgitdemo-poster.jpeg"
               alt=""
               className="absolute inset-0 w-full h-full object-cover"
+              style={{
+                objectPosition: "center top",
+                boxSizing: "border-box",
+                paddingTop: "max(env(safe-area-inset-top, 0px), 54px)",
+              }}
             />
           )}
 
@@ -532,7 +541,6 @@ function VideoOverlay({ onNext, onSkip }: { onNext: () => void; onSkip: () => vo
               </motion.div>
             )}
           </AnimatePresence>
-          </div>
         </div>
 
         <div className="mt-3 h-[3px] w-full bg-black/5 rounded-[2px] overflow-hidden flex-shrink-0">
