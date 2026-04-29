@@ -456,9 +456,10 @@ function VideoOverlay({ onNext, onSkip }: { onNext: () => void; onSkip: () => vo
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.26 }}
-      className="fixed inset-0 z-[70] bg-white text-[#0B1220] flex flex-col overflow-y-auto overflow-x-hidden"
+      className="fixed inset-0 z-[70] flex justify-center bg-white sm:bg-[rgba(10,15,30,0.55)] sm:items-center sm:p-6 sm:backdrop-blur-sm"
       style={{ WebkitOverflowScrolling: "touch" }}
     >
+      <div className="bg-white text-[#0B1220] flex flex-col w-full h-full sm:w-[420px] sm:h-auto sm:max-h-[calc(100vh-48px)] sm:rounded-[28px] sm:shadow-[0_24px_80px_rgba(10,15,30,0.45)] overflow-y-auto overflow-x-hidden">
       <StepHeader step={3} onSkip={onSkip} />
 
       <div className="px-5 pt-6">
@@ -573,6 +574,7 @@ function VideoOverlay({ onNext, onSkip }: { onNext: () => void; onSkip: () => vo
           Tap the video to pause
         </div>
       </div>
+      </div>
     </motion.div>
   );
 }
@@ -586,8 +588,9 @@ function DiagramOverlay({ onDone, onSkip }: { onDone: () => void; onSkip: () => 
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.26 }}
-      className="fixed inset-0 z-[70] bg-white text-[#0B1220] flex flex-col overflow-auto"
+      className="fixed inset-0 z-[70] flex justify-center bg-white sm:bg-[rgba(10,15,30,0.55)] sm:items-center sm:p-6 sm:backdrop-blur-sm"
     >
+      <div className="bg-white text-[#0B1220] flex flex-col w-full h-full sm:w-[420px] sm:h-auto sm:max-h-[calc(100vh-48px)] sm:rounded-[28px] sm:shadow-[0_24px_80px_rgba(10,15,30,0.45)] overflow-y-auto overflow-x-hidden">
       <StepHeader step={4} onSkip={onSkip} />
 
       <div className="px-5 pt-7">
@@ -636,6 +639,7 @@ function DiagramOverlay({ onDone, onSkip }: { onDone: () => void; onSkip: () => 
         <div className="text-center mt-3 text-xs text-gray-400">
           You can revisit this anytime from Settings
         </div>
+      </div>
       </div>
     </motion.div>
   );
