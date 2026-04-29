@@ -490,7 +490,7 @@ function VideoOverlay({ onNext, onSkip }: { onNext: () => void; onSkip: () => vo
           <video
             ref={videoRef}
             autoPlay muted loop playsInline
-            poster="/pocketringgitdemo-poster.jpeg"
+            poster="/pocketringgitdemo-poster.png"
             onLoadedData={() => setReady(true)}
             onTimeUpdate={onTime}
             style={{
@@ -507,7 +507,7 @@ function VideoOverlay({ onNext, onSkip }: { onNext: () => void; onSkip: () => vo
 
           {!ready && (
             <img
-              src="/pocketringgitdemo-poster.jpeg"
+              src="/pocketringgitdemo-poster.png"
               alt=""
               className="absolute inset-0 w-full h-full object-cover"
               style={{
