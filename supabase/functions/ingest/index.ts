@@ -26,6 +26,27 @@ const transactionSchema = z.object({
 
 const llmResponseSchema = z.array(transactionSchema);
 
+function hasExplicitTimezoneOffset(value: string): boolean {
+  return /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
+}
+
+function normalizeTransactionAt(value: string): string {
+  const trimmed = value.trim();
+  if (hasExplicitTimezoneOffset(trimmed)) return trimmed;
+
+  const dateOnly = /^(\d{4}-\d{2}-\d{2})$/.exec(trimmed);
+  if (dateOnly) {
+    return `${dateOnly[1]}T00:00:00+08:00`;
+  }
+
+  const dateTime = /^(\d{4}-\d{2}-\d{2})([T\s]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?)$/.exec(trimmed);
+  if (dateTime) {
+    return `${dateTime[1]}${dateTime[2].replace(/\s/, "T")}+08:00`;
+  }
+
+  return trimmed;
+}
+
 function makeRequestId() {
   return Math.random().toString(36).slice(2, 10);
 }
@@ -53,7 +74,7 @@ async function callGeminiFlash(
     "- The merchant should be the store or business name, NOT individual item names.",
     "- If the input has multiple unrelated transactions (e.g. several notifications), extract each one.",
     "",
-    `Assign ONE category from this list: ${categoryNames.join(", ")}.`,
+    `Assign ONE category from this list (labels include the category type): ${categoryNames.join(", ")}.`,
     "If none fit well, use 'Others' and set confidence lower.",
     "",
     "For each transaction return a JSON object with:",
@@ -63,7 +84,7 @@ async function callGeminiFlash(
     "- category: string (from the list above)",
     `- source: "${source === "receipt" ? "receipt" : "manual"}" (use this exact value)`,
     "- confidence: number 0-1",
-    `- transaction_at: ISO datetime string if visible, otherwise omit. The current date/time is ${new Date().toISOString()} (UTC). If the source shows only a date like "14 Apr" or "14/04" without a year, assume the current year. Never invent a year — if no date is visible at all, omit this field.`,
+    `- transaction_at: ISO datetime string with an explicit timezone offset if visible, otherwise omit. If the source time is in Malaysia local time, use +08:00. The current date/time is ${new Date().toISOString()} (UTC). If the source shows only a date like "14 Apr" or "14/04" without a year, assume the current year. Never invent a year — if no date is visible at all, omit this field.`,
     "",
     "Return a JSON array only. No markdown, no explanation.",
     "If no financial transaction is found, return: []",
@@ -243,15 +264,21 @@ Deno.serve(async (req) => {
 
     const { data: categories, error: categoriesError } = await supabase
       .from("categories")
-      .select("id, name")
+      .select("id, name, direction")
       .eq("user_id", userId);
 
     if (categoriesError) {
       log(requestId, "categories_fetch_failed", { error: categoriesError.message });
     }
 
-    const categoryNames = (categories ?? []).map((c: { name: string }) => c.name);
-    const categoryMap = new Map((categories ?? []).map((c: { id: string; name: string }) => [c.name.toLowerCase(), c.id]));
+    const categoryNames = (categories ?? []).map((c: { name: string; direction: string }) => `${c.name} (${c.direction})`);
+    const categoryMap = new Map<string, string>();
+    for (const c of (categories ?? []) as Array<{ id: string; name: string; direction: string }>) {
+      categoryMap.set(`${c.name.toLowerCase()} (${c.direction.toLowerCase()})`, c.id);
+      if (!categoryMap.has(c.name.toLowerCase())) {
+        categoryMap.set(c.name.toLowerCase(), c.id);
+      }
+    }
 
     const geminiResult = await callGeminiFlash(body.text, body.image, categoryNames, geminiApiKey, body.source, requestId);
     const transactions = geminiResult.transactions;
@@ -300,12 +327,12 @@ Deno.serve(async (req) => {
       direction: t.direction,
       merchant: t.merchant,
       description: `${t.direction === "expense" ? "Paid" : "Received"} ${t.amount} - ${t.merchant}`,
-      category_id: categoryMap.get(t.category.toLowerCase()) ?? categoryMap.get("others") ?? null,
+      category_id: categoryMap.get(t.category.toLowerCase()) ?? categoryMap.get(`${t.category.toLowerCase()} (${t.direction.toLowerCase()})`) ?? categoryMap.get("others") ?? null,
       source: body.source === "receipt" ? "receipt" as const : t.source,
       confidence: t.confidence,
       raw_text: body.text ?? "(image)",
       needs_review: t.confidence < 0.7,
-      transaction_at: t.transaction_at ?? body.timestamp ?? new Date().toISOString(),
+      transaction_at: normalizeTransactionAt(t.transaction_at ?? body.timestamp ?? new Date().toISOString()),
     }));
 
     const { data: inserted, error: insertError } = await supabase

@@ -11,10 +11,10 @@ import CategoryPicker from "../components/CategoryPicker";
 import DateTimePickerSheet from "../components/DateTimePickerSheet";
 import DateSettingsSheet from "../components/DateSettingsSheet";
 import BottomSheet from "../components/BottomSheet";
+import TransactionViewToggle from "../components/TransactionViewToggle";
 import type { Category, Transaction } from "../types";
-
-const moneyFmt = (n: number) =>
-  `RM${n.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+import { toLocalIsoWithOffset } from "../lib/datetime";
+import { formatTransactionAmount, getTransactionAmountClass, moneyFmt } from "../lib/money";
 
 const relativeDate = (iso: string) => {
   const d = new Date(iso);
@@ -63,8 +63,36 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
   const editFormRef = useRef<HTMLDivElement | null>(null);
   const [showFab, setShowFab] = useState(true);
   const [chartCategoryId, setChartCategoryId] = useState<string | null>(null);
+  const [recentView, setRecentView] = useState<Transaction["direction"]>("expense");
+  const [manualDirection, setManualDirection] = useState<Transaction["direction"]>("expense");
+  const [editDirection, setEditDirection] = useState<Transaction["direction"]>("expense");
   const lastScrollY = useRef(0);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setDetailId(null);
+    setEditingId(null);
+  }, [recentView]);
+
+  const manualCategories = useMemo(
+    () => categories.filter((c) => c.direction === manualDirection),
+    [categories, manualDirection]
+  );
+
+  const editCategories = useMemo(
+    () => categories.filter((c) => c.direction === editDirection),
+    [categories, editDirection]
+  );
+
+  useEffect(() => {
+    if (manualCategories.length === 0) {
+      setManualCategory("");
+      return;
+    }
+    if (!manualCategories.some((c) => c.id === manualCategory)) {
+      setManualCategory(manualCategories[0].id);
+    }
+  }, [manualCategories, manualCategory]);
 
   // Manual form state
   const [manualAmount, setManualAmount] = useState("");
@@ -91,6 +119,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
       setEditMerchant(t.merchant);
       setEditCategory(t.category_id ?? "");
       setEditDate(new Date(t.transaction_at));
+      setEditDirection(t.direction);
     }, 500);
   };
 
@@ -109,7 +138,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
       merchant: editMerchant.trim(),
       category_id: editCategory || undefined,
       needs_review: false,
-      transaction_at: editDate.toISOString(),
+      transaction_at: toLocalIsoWithOffset(editDate),
     });
     setTransactions((prev) => prev.map((t) => (t.id === id ? updated : t)));
     setEditingId(null);
@@ -159,11 +188,6 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
       const [fromDate, toDate] = getDateRange(period);
       const txns = await fetchTransactions({ from_date: fromDate, to_date: toDate, limit: 100 });
       setTransactions(txns);
-
-      const expenseTotal = txns
-        .filter((t) => t.direction === "expense")
-        .reduce((sum, t) => sum + Number(t.amount), 0);
-      setTotal(expenseTotal);
     } catch {
       // Will retry when auth token refreshes
     }
@@ -189,15 +213,29 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
   }, []);
 
   useEffect(() => {
-    if (categories.length > 0 && !manualCategory) {
-      setManualCategory(categories[0].id);
+    if (manualCategories.length > 0 && !manualCategories.some((c) => c.id === manualCategory)) {
+      setManualCategory(manualCategories[0].id);
     }
-  }, [categories, manualCategory]);
+  }, [manualCategories, manualCategory]);
+
+  const selectedTransactions = useMemo(
+    () => transactions.filter((t) => t.direction === recentView),
+    [transactions, recentView]
+  );
+
+  const summaryTotal = useMemo(
+    () => selectedTransactions.reduce((sum, t) => sum + Number(t.amount), 0),
+    [selectedTransactions]
+  );
+
+  useEffect(() => {
+    setTotal(summaryTotal);
+  }, [summaryTotal]);
 
   const breakdown = useMemo(() => {
     const totals = new Map<string, { category: Category; total: number }>();
-    for (const t of transactions) {
-      if (t.direction !== "expense" || !t.category) continue;
+    for (const t of selectedTransactions) {
+      if (!t.category) continue;
       const existing = totals.get(t.category.id);
       if (existing) existing.total += Number(t.amount);
       else totals.set(t.category.id, { category: t.category, total: Number(t.amount) });
@@ -208,11 +246,11 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
       ...i,
       percentage: (i.total / grandTotal) * 100,
     }));
-  }, [transactions]);
+  }, [selectedTransactions]);
 
   const groupedTransactions = useMemo(() => {
     const groups = new Map<string, Transaction[]>();
-    for (const t of transactions) {
+    for (const t of selectedTransactions) {
       const key = new Date(t.transaction_at).toDateString();
       const list = groups.get(key) ?? [];
       list.push(t);
@@ -222,9 +260,11 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
       label: relativeDate(txns[0].transaction_at),
       date: dateStr,
       transactions: txns,
-      dayTotal: txns.filter((t) => t.direction === "expense").reduce((s, t) => s + Number(t.amount), 0),
+      dayTotal: txns.reduce((s, t) => s + Number(t.amount), 0),
     }));
-  }, [transactions]);
+  }, [selectedTransactions]);
+
+  const summaryVerb = recentView === "expense" ? "spent" : "received";
 
   const periodLabel = period === "day" ? "today" : period === "week" ? "this week" : "this month";
 
@@ -252,7 +292,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
     const response = await fetch(`${supabaseUrl}/functions/v1/ingest`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${settings.api_key}` },
-      body: JSON.stringify({ ...opts, timestamp: new Date().toISOString() }),
+      body: JSON.stringify({ ...opts, timestamp: toLocalIsoWithOffset() }),
     });
     return response.json();
   };
@@ -327,13 +367,13 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const amount = parseFloat(manualAmount);
-    if (!amount || !manualMerchant.trim()) return;
+    if (!amount || !manualMerchant.trim() || !manualCategory) return;
     setIsProcessing(true);
     try {
       await createManualTransaction({
         amount, merchant: manualMerchant.trim(), category_id: manualCategory,
-        direction: "expense", source: "manual",
-        transaction_at: manualDate.toISOString(),
+        direction: manualDirection, source: "manual",
+        transaction_at: toLocalIsoWithOffset(manualDate),
       });
       setCaptureStatus(`Recorded RM${amount.toFixed(2)} - ${manualMerchant.trim()}`);
       setManualAmount(""); setManualMerchant(""); setManualDate(new Date());
@@ -350,7 +390,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
           <button onClick={openNameDialog} className="text-[#4169e1] hover:text-[#3151c1] transition-colors">
             {displayName}
           </button>
-          , You have spent{" "}
+          , You have {summaryVerb}{" "}
           <button onClick={() => setShowChart(true)} className="text-[#4169e1] hover:text-[#3151c1] transition-colors">
             {moneyFmt(total)}
           </button>{" "}
@@ -413,16 +453,19 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
 
       {/* Recent Transactions */}
       <div>
+        <TransactionViewToggle value={recentView} onChange={setRecentView} className="mb-4" />
         <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-4">Recent</h2>
         {groupedTransactions.length === 0 ? (
-          <p className="text-gray-400 text-sm py-8 text-center">No transactions yet.</p>
+          <p className="text-gray-400 text-sm py-8 text-center">No {recentView} transactions yet.</p>
         ) : (
           <div className="space-y-6">
             {groupedTransactions.map((group) => (
               <div key={group.date}>
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-medium text-gray-400">{group.label}</span>
-                  <span className="text-xs text-gray-400">-{moneyFmt(group.dayTotal)}</span>
+                  <span className={`text-xs font-medium ${getTransactionAmountClass(recentView)}`}>
+                    {formatTransactionAmount(group.dayTotal, recentView)}
+                  </span>
                 </div>
                 <div className="space-y-0.5">
                   {group.transactions.map((t) => (
@@ -509,7 +552,9 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                               </div>
                             </div>
                             <div className="text-right ml-4 shrink-0">
-                              <div className="font-semibold text-[15px]">-{moneyFmt(Number(t.amount))}</div>
+                                <div className={`font-semibold text-[15px] ${getTransactionAmountClass(t.direction)}`}>
+                                  {formatTransactionAmount(Number(t.amount), t.direction)}
+                                </div>
                               <div className="text-[10px] text-gray-400">
                                 {new Date(t.transaction_at).toLocaleTimeString("en-MY", { hour: "2-digit", minute: "2-digit" })}
                               </div>
@@ -537,7 +582,9 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-gray-400">Amount</span>
-                                <span className="font-semibold">RM{Number(t.amount).toFixed(2)}</span>
+                                <span className={`font-semibold ${getTransactionAmountClass(t.direction)}`}>
+                                  {formatTransactionAmount(Number(t.amount), t.direction)}
+                                </span>
                               </div>
                               {t.confidence < 1 && (
                                 <div className="flex justify-between">
@@ -688,7 +735,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                     <X size={20} />
                   </button>
                 </div>
-                <p className="text-sm text-gray-400 mb-6">Spending {periodLabel}</p>
+                <p className="text-sm text-gray-400 mb-6">{recentView === "expense" ? "Spending" : "Income"} {periodLabel}</p>
 
                 {/* Chart */}
                 {breakdown.length > 0 ? (
@@ -728,8 +775,8 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                           {/* Expanded transaction list for this category */}
                           {chartCategoryId === category.id && (
                             <div className="pt-1.5 pb-1 px-2 space-y-0.5 reveal-down">
-                                  {transactions
-                                    .filter((t) => t.direction === "expense" && t.category_id === category.id)
+                                  {selectedTransactions
+                                    .filter((t) => t.category_id === category.id)
                                     .map((t) => (
                                       <div key={t.id} className="flex items-center justify-between py-2.5 px-3 rounded-xl bg-white">
                                         <div className="min-w-0">
@@ -740,7 +787,9 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                                             {new Date(t.transaction_at).toLocaleTimeString("en-MY", { hour: "2-digit", minute: "2-digit" })}
                                           </div>
                                         </div>
-                                        <div className="font-semibold text-[14px] ml-4 shrink-0">-{moneyFmt(Number(t.amount))}</div>
+                                          <div className={`font-semibold text-[14px] ml-4 shrink-0 ${getTransactionAmountClass(t.direction)}`}>
+                                            {formatTransactionAmount(Number(t.amount), t.direction)}
+                                          </div>
                                       </div>
                                     ))}
                             </div>
@@ -789,6 +838,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
 
                 {captureMode === "manual" ? (
                   <form onSubmit={(e) => void handleManualSubmit(e)} className="space-y-3">
+                    <TransactionViewToggle value={manualDirection} onChange={setManualDirection} />
                     <input
                       type="text" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]*"
                       className="w-full h-12 px-4 bg-gray-50 rounded-xl text-base outline-none focus:ring-2 focus:ring-[#4169e1]/20"
@@ -806,13 +856,13 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                       className="w-full h-12 px-4 bg-gray-50 rounded-xl text-base flex items-center gap-2 active:bg-gray-100 transition-colors touch-manipulation"
                     >
                       {(() => {
-                        const cat = categories.find((c) => c.id === manualCategory);
+                        const cat = manualCategories.find((c) => c.id === manualCategory);
                         return cat ? (
                           <>
                             <div className="w-6 h-6 rounded-md text-white text-[11px] font-bold flex items-center justify-center shrink-0" style={{ backgroundColor: cat.color }}>{cat.name[0]}</div>
                             <span className="truncate">{cat.name}</span>
                           </>
-                        ) : <span className="text-gray-400">Select category</span>;
+                        ) : <span className="text-gray-400">Select {manualDirection === "income" ? "income" : "expense"} category</span>;
                       })()}
                     </button>
                     <button
@@ -827,7 +877,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                     </button>
                     <button
                       className="w-full h-12 bg-[#4169e1] text-white rounded-xl font-medium active:scale-[0.98] transition-all disabled:opacity-50"
-                      type="submit" disabled={isProcessing}
+                      type="submit" disabled={isProcessing || !manualCategory || manualCategories.length === 0}
                     >
                       {isProcessing ? "Saving..." : "Record"}
                     </button>
@@ -868,18 +918,20 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
       <CategoryPicker
         open={showCatPicker}
         onClose={() => setShowCatPicker(false)}
-        categories={categories}
+        categories={editCategories}
         selected={editCategory}
         onSelect={setEditCategory}
+        emptyMessage={`No ${editDirection} categories available.`}
       />
 
       {/* Manual Category Picker */}
       <CategoryPicker
         open={showManualCatPicker}
         onClose={() => setShowManualCatPicker(false)}
-        categories={categories}
+        categories={manualCategories}
         selected={manualCategory}
         onSelect={setManualCategory}
+        emptyMessage={`No ${manualDirection} categories available.`}
       />
 
       {/* Edit Date/Time Picker */}

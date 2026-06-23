@@ -3,11 +3,14 @@ import BottomSheet from "./BottomSheet";
 import CategoryAvatar from "./CategoryAvatar";
 import { CATEGORY_ICON_KEYS, CATEGORY_ICONS, CATEGORY_COLORS } from "../lib/category-icons";
 import { Check } from "lucide-react";
+import TransactionViewToggle from "./TransactionViewToggle";
+import type { Transaction } from "../types";
 
 export type CategoryDraft = {
   name: string;
   color: string;
   icon: string | null;
+  direction: Transaction["direction"];
 };
 
 type Props = {
@@ -23,6 +26,7 @@ export default function CategoryEditorSheet({ open, onClose, initial, title, sub
   const [name, setName] = useState(initial?.name ?? "");
   const [color, setColor] = useState(initial?.color ?? CATEGORY_COLORS[11]);
   const [icon, setIcon] = useState<string | null>(initial?.icon ?? null);
+  const [direction, setDirection] = useState<Transaction["direction"]>(initial?.direction ?? "expense");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -30,14 +34,15 @@ export default function CategoryEditorSheet({ open, onClose, initial, title, sub
     setName(initial?.name ?? "");
     setColor(initial?.color ?? CATEGORY_COLORS[11]);
     setIcon(initial?.icon ?? null);
-  }, [open, initial?.name, initial?.color, initial?.icon]);
+    setDirection(initial?.direction ?? "expense");
+  }, [open, initial?.name, initial?.color, initial?.icon, initial?.direction]);
 
   const handleSubmit = async () => {
     const trimmed = name.trim();
     if (!trimmed || busy) return;
     setBusy(true);
     try {
-      await onSubmit({ name: trimmed, color, icon });
+      await onSubmit({ name: trimmed, color, icon, direction });
       onClose();
     } finally {
       setBusy(false);
@@ -57,6 +62,11 @@ export default function CategoryEditorSheet({ open, onClose, initial, title, sub
           placeholder="Category name"
           className="flex-1 h-11 px-3 bg-gray-50 rounded-xl text-base outline-none focus:ring-2 focus:ring-[#4169e1]/20"
         />
+      </div>
+
+      <div className="mb-4">
+        <div className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">Type</div>
+        <TransactionViewToggle value={direction} onChange={setDirection} />
       </div>
 
       <div className="mb-4">

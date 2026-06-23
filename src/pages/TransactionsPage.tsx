@@ -6,12 +6,12 @@ import { getMonthRange, getWeekRange } from "../lib/date-cycle";
 import CategoryPicker from "../components/CategoryPicker";
 import BottomSheet from "../components/BottomSheet";
 import DateTimePickerSheet from "../components/DateTimePickerSheet";
+import TransactionViewToggle from "../components/TransactionViewToggle";
 import Toast from "../components/Toast";
 import { exportTransactionsXLSX, exportTransactionsCSV, exportFilename } from "../lib/export";
 import type { Category, Transaction } from "../types";
-
-const moneyFmt = (n: number) =>
-  `RM${n.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+import { formatTransactionAmount, getTransactionAmountClass } from "../lib/money";
+import { toLocalIsoWithOffset } from "../lib/datetime";
 
 const relativeDate = (iso: string) => {
   const d = new Date(iso);
@@ -47,6 +47,7 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
   const [editMerchant, setEditMerchant] = useState("");
   const [editCategory, setEditCategory] = useState("");
   const [editDate, setEditDate] = useState<Date>(new Date());
+  const [editDirection, setEditDirection] = useState<Transaction["direction"]>("expense");
   const [showCatPicker, setShowCatPicker] = useState(false);
   const [showEditDatePicker, setShowEditDatePicker] = useState(false);
   const editFormRef = useRef<HTMLDivElement | null>(null);
@@ -69,6 +70,7 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
   const [showCalendar, setShowCalendar] = useState(false);
   const [dateMode, setDateMode] = useState<DateFilterMode>("all");
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [transactionView, setTransactionView] = useState<Transaction["direction"]>("expense");
 
   // Custom filter pickers
   const [showSourcePicker, setShowSourcePicker] = useState(false);
@@ -134,6 +136,15 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, filterSource, filterCategory, showReviewOnly, dateRange]);
 
+  useEffect(() => {
+    setDetailId(null);
+    setEditingId(null);
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+    setMoreOpen(false);
+    setExportSubOpen(false);
+  }, [transactionView]);
+
   // Close edit view on outside click or Esc
   useEffect(() => {
     if (!editingId) return;
@@ -164,9 +175,19 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
     return set;
   }, [transactions]);
 
+  const editCategories = useMemo(
+    () => categories.filter((c) => c.direction === editDirection),
+    [categories, editDirection]
+  );
+
+  const visibleTransactions = useMemo(
+    () => transactions.filter((t) => t.direction === transactionView),
+    [transactions, transactionView]
+  );
+
   const periodTotal = useMemo(() =>
-    transactions.filter((t) => t.direction === "expense").reduce((s, t) => s + Number(t.amount), 0),
-  [transactions]);
+    visibleTransactions.reduce((s, t) => s + Number(t.amount), 0),
+  [visibleTransactions]);
 
   const handleTap = (t: Transaction) => {
     if (selectionMode) { toggleSelected(t.id); return; }
@@ -186,6 +207,7 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
       setEditMerchant(t.merchant);
       setEditCategory(t.category_id ?? "");
       setEditDate(new Date(t.transaction_at));
+      setEditDirection(t.direction);
       setPressingId(null);
       setHeldId(null);
     }, 500);
@@ -212,7 +234,7 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
       merchant: editMerchant.trim(),
       category_id: editCategory || undefined,
       needs_review: false,
-      transaction_at: editDate.toISOString(),
+      transaction_at: toLocalIsoWithOffset(editDate),
     });
     setTransactions((prev) => prev.map((t) => (t.id === id ? updated : t)));
     setEditingId(null);
@@ -252,8 +274,8 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
   };
 
   const selectedTransactions = useMemo(
-    () => transactions.filter((t) => selectedIds.has(t.id)),
-    [transactions, selectedIds]
+    () => visibleTransactions.filter((t) => selectedIds.has(t.id)),
+    [visibleTransactions, selectedIds]
   );
 
   const handleExport = (kind: "xlsx" | "csv") => {
@@ -296,7 +318,7 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
   // Group transactions by date
   const grouped = (() => {
     const groups = new Map<string, Transaction[]>();
-    for (const t of transactions) {
+    for (const t of visibleTransactions) {
       const key = new Date(t.transaction_at).toDateString();
       const list = groups.get(key) ?? [];
       list.push(t);
@@ -306,7 +328,7 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
       label: relativeDate(txns[0].transaction_at),
       date: dateStr,
       transactions: txns,
-      dayTotal: txns.filter((t) => t.direction === "expense").reduce((s, t) => s + Number(t.amount), 0),
+      dayTotal: txns.reduce((s, t) => s + Number(t.amount), 0),
     }));
   })();
 
@@ -329,6 +351,8 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
           <span className="max-w-[120px] truncate">{dateRange.label}</span>
         </button>
       </div>
+
+      <TransactionViewToggle value={transactionView} onChange={setTransactionView} className="mb-4" />
 
       {/* Date mode pills */}
       <div className="flex items-center justify-between gap-2 mb-4">
@@ -420,7 +444,9 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
       {/* Period total */}
       {dateMode !== "all" && (
         <div className="mb-4 flex items-baseline gap-2">
-          <span className="text-2xl font-bold">-{moneyFmt(periodTotal)}</span>
+          <span className={`text-2xl font-bold ${getTransactionAmountClass(transactionView)}`}>
+            {formatTransactionAmount(periodTotal, transactionView)}
+          </span>
           <span className="text-xs text-gray-400">{dateRange.label}</span>
         </div>
       )}
@@ -492,7 +518,9 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
             <div key={group.date}>
               <div className="flex items-center justify-between mb-2 px-3">
                 <span className="text-xs font-medium text-gray-400">{group.label}</span>
-                <span className="text-xs text-gray-400">-{moneyFmt(group.dayTotal)}</span>
+                <span className={`text-xs font-medium ${getTransactionAmountClass(transactionView)}`}>
+                  {formatTransactionAmount(group.dayTotal, transactionView)}
+                </span>
               </div>
               <div className="space-y-0.5">
                 {group.transactions.map((t) => (
@@ -584,8 +612,8 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
                             </div>
                           </div>
                           <div className="text-right ml-4 shrink-0">
-                            <div className="font-semibold text-[15px]">
-                              {t.direction === "expense" ? "-" : "+"}{moneyFmt(Number(t.amount))}
+                            <div className={`font-semibold text-[15px] ${getTransactionAmountClass(t.direction)}`}>
+                              {formatTransactionAmount(Number(t.amount), t.direction)}
                             </div>
                             <div className="text-[10px] text-gray-400">
                               {new Date(t.transaction_at).toLocaleTimeString("en-MY", { hour: "2-digit", minute: "2-digit" })}
@@ -613,7 +641,9 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
                             </div>
                             <div className="flex justify-between">
                               <span className="text-gray-400">Amount</span>
-                              <span className="font-semibold">RM{Number(t.amount).toFixed(2)}</span>
+                              <span className={`font-semibold ${getTransactionAmountClass(t.direction)}`}>
+                                {formatTransactionAmount(Number(t.amount), t.direction)}
+                              </span>
                             </div>
                             {t.confidence < 1 && (
                               <div className="flex justify-between">
@@ -682,9 +712,10 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
       <CategoryPicker
         open={showCatPicker}
         onClose={() => setShowCatPicker(false)}
-        categories={categories}
+        categories={editCategories}
         selected={editCategory}
         onSelect={setEditCategory}
+        emptyMessage={`No ${editDirection} categories available.`}
       />
 
       {/* Edit Date/Time Picker */}

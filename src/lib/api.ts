@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { toLocalIsoWithOffset } from "./datetime";
 import type { Category, Transaction, UserSettings } from "../types";
 
 // --- Categories ---
@@ -14,13 +15,18 @@ export async function fetchCategories(): Promise<Category[]> {
   return data;
 }
 
-export async function createCategory(name: string, color: string, icon: string | null = null): Promise<Category> {
+export async function createCategory(
+  name: string,
+  color: string,
+  icon: string | null = null,
+  direction: Category["direction"] = "expense"
+): Promise<Category> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
 
   const { data, error } = await supabase
     .from("categories")
-    .insert({ user_id: user.id, name, color, icon, is_default: false })
+    .insert({ user_id: user.id, name, color, icon, direction, is_default: false })
     .select()
     .single();
 
@@ -28,7 +34,7 @@ export async function createCategory(name: string, color: string, icon: string |
   return data;
 }
 
-export async function updateCategory(id: string, updates: Partial<Pick<Category, "name" | "color" | "icon">>): Promise<Category> {
+export async function updateCategory(id: string, updates: Partial<Pick<Category, "name" | "color" | "icon" | "direction">>): Promise<Category> {
   const { data, error } = await supabase
     .from("categories")
     .update(updates)
@@ -124,7 +130,7 @@ export async function createManualTransaction(entry: {
       source: entry.source,
       confidence: 1.0,
       needs_review: false,
-      transaction_at: entry.transaction_at ?? new Date().toISOString()
+      transaction_at: entry.transaction_at ?? toLocalIsoWithOffset()
     })
     .select("*, category:categories(*)")
     .single();
