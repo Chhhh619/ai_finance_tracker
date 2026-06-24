@@ -1,6 +1,5 @@
 export type TransactionDirection = "expense" | "income";
 export type TransactionSource = "ewallet" | "bank" | "manual" | "receipt";
-export type DuplicateHandling = "all" | "expenses_only" | "smart_merge";
 
 export interface Category {
   id: string;
@@ -8,6 +7,7 @@ export interface Category {
   name: string;
   color: string;
   icon: string | null;
+  direction: TransactionDirection;
   is_default: boolean;
 }
 
@@ -32,7 +32,6 @@ export interface Transaction {
 export interface UserSettings {
   user_id: string;
   display_name: string | null;
-  duplicate_handling: DuplicateHandling;
   default_currency: string;
   ai_model: string;
   categories_order: string[] | null;

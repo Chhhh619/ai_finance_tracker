@@ -1,5 +1,6 @@
 import { loadFromStorage, saveToStorage } from "./storage";
 import { supabase } from "./supabase";
+import { toLocalIsoWithOffset } from "./datetime";
 
 const QUEUE_KEY = "pocketringgit.offline-queue.v1";
 
@@ -21,8 +22,8 @@ export function addToQueue(text: string, source: "manual" | "receipt"): void {
     id: crypto.randomUUID(),
     text,
     source,
-    timestamp: new Date().toISOString(),
-    queuedAt: new Date().toISOString(),
+    timestamp: toLocalIsoWithOffset(),
+    queuedAt: toLocalIsoWithOffset(),
   });
   saveToStorage(QUEUE_KEY, queue);
 }

@@ -16,12 +16,12 @@ export default function CategoriesPage({ categories, onCategoriesChanged }: Cate
   const [editing, setEditing] = useState<Category | null>(null);
 
   const handleCreate = async (draft: CategoryDraft) => {
-    if (categories.some((c) => c.name.toLowerCase() === draft.name.toLowerCase())) {
+    if (categories.some((c) => c.name.toLowerCase() === draft.name.toLowerCase() && c.direction === draft.direction)) {
       setStatus(`"${draft.name}" already exists.`);
       return;
     }
     try {
-      await createCategory(draft.name, draft.color, draft.icon);
+      await createCategory(draft.name, draft.color, draft.icon, draft.direction);
       setStatus("");
       onCategoriesChanged();
     } catch {
@@ -72,7 +72,11 @@ export default function CategoriesPage({ categories, onCategoriesChanged }: Cate
             <CategoryAvatar category={c} size={40} />
             <div className="flex-1 min-w-0">
               <div className="font-medium text-[15px] truncate">{c.name}</div>
-              <div className="text-xs text-gray-400">{c.is_default ? "Default" : "Custom"}</div>
+                <div className="text-xs text-gray-400 flex items-center gap-2">
+                  <span>{c.is_default ? "Default" : "Custom"}</span>
+                  <span className="text-gray-300">•</span>
+                  <span className="capitalize">{c.direction}</span>
+                </div>
             </div>
             {!c.is_default && (
               <button
@@ -100,7 +104,7 @@ export default function CategoriesPage({ categories, onCategoriesChanged }: Cate
       <CategoryEditorSheet
         open={editing !== null}
         onClose={() => setEditing(null)}
-        initial={editing ? { name: editing.name, color: editing.color, icon: editing.icon } : undefined}
+        initial={editing ? { name: editing.name, color: editing.color, icon: editing.icon, direction: editing.direction } : undefined}
         title="Edit Category"
         submitLabel="Save"
         onSubmit={(draft) => editing ? handleUpdate(editing.id, draft) : Promise.resolve()}
