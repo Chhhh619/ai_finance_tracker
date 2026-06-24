@@ -289,38 +289,7 @@ Deno.serve(async (req) => {
       return jsonResponse(200, { status: "empty", message: "🔍 No transaction found in this capture", debug });
     }
 
-    let filtered = transactions;
-    if (settings.duplicate_handling === "expenses_only") {
-      const amounts = new Map<number, typeof transactions>();
-      for (const t of transactions) {
-        const existing = amounts.get(t.amount) ?? [];
-        existing.push(t);
-        amounts.set(t.amount, existing);
-      }
-
-      filtered = [];
-      for (const [, group] of amounts) {
-        const hasExpense = group.some(t => t.direction === "expense");
-        const hasIncome = group.some(t => t.direction === "income");
-        if (hasExpense && hasIncome) {
-          filtered.push(...group.filter(t => t.direction === "expense"));
-        } else {
-          filtered.push(...group);
-        }
-      }
-    } else if (settings.duplicate_handling === "smart_merge") {
-      const seen = new Set<number>();
-      filtered = [];
-      for (const t of transactions) {
-        if (t.direction === "income" && seen.has(t.amount)) continue;
-        if (t.direction === "expense") seen.add(t.amount);
-        filtered.push(t);
-      }
-    }
-
-    log(requestId, "filtered", { before: transactions.length, after: filtered.length, mode: settings.duplicate_handling });
-
-    const inserts = filtered.map((t) => ({
+    const inserts = transactions.map((t) => ({
       user_id: userId,
       amount: t.amount,
       currency: "MYR",

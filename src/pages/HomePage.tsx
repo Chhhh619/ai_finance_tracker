@@ -84,16 +84,6 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
     [categories, editDirection]
   );
 
-  useEffect(() => {
-    if (manualCategories.length === 0) {
-      setManualCategory("");
-      return;
-    }
-    if (!manualCategories.some((c) => c.id === manualCategory)) {
-      setManualCategory(manualCategories[0].id);
-    }
-  }, [manualCategories, manualCategory]);
-
   // Manual form state
   const [manualAmount, setManualAmount] = useState("");
   const [manualMerchant, setManualMerchant] = useState("");
@@ -213,7 +203,11 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
   }, []);
 
   useEffect(() => {
-    if (manualCategories.length > 0 && !manualCategories.some((c) => c.id === manualCategory)) {
+    if (manualCategories.length === 0) {
+      setManualCategory("");
+      return;
+    }
+    if (!manualCategories.some((c) => c.id === manualCategory)) {
       setManualCategory(manualCategories[0].id);
     }
   }, [manualCategories, manualCategory]);
@@ -552,7 +546,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                               </div>
                             </div>
                             <div className="text-right ml-4 shrink-0">
-                                <div className={`font-semibold text-[15px] ${getTransactionAmountClass(t.direction)}`}>
+                                <div className="font-semibold text-[15px] text-gray-900">
                                   {formatTransactionAmount(Number(t.amount), t.direction)}
                                 </div>
                               <div className="text-[10px] text-gray-400">
@@ -582,7 +576,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-gray-400">Amount</span>
-                                <span className={`font-semibold ${getTransactionAmountClass(t.direction)}`}>
+                                <span className="font-semibold text-gray-900">
                                   {formatTransactionAmount(Number(t.amount), t.direction)}
                                 </span>
                               </div>
@@ -787,7 +781,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                                             {new Date(t.transaction_at).toLocaleTimeString("en-MY", { hour: "2-digit", minute: "2-digit" })}
                                           </div>
                                         </div>
-                                          <div className={`font-semibold text-[14px] ml-4 shrink-0 ${getTransactionAmountClass(t.direction)}`}>
+                                          <div className="font-semibold text-[14px] ml-4 shrink-0 text-gray-900">
                                             {formatTransactionAmount(Number(t.amount), t.direction)}
                                           </div>
                                       </div>

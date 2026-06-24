@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchSettings, updateSettings, fetchTransactions } from "../lib/api";
+import { fetchSettings, fetchTransactions } from "../lib/api";
 import { signOut, registerPasskey } from "../lib/auth";
 import { supabase } from "../lib/supabase";
 import { getQueue, flushQueue } from "../lib/offline-queue";
@@ -9,7 +9,7 @@ import BottomSheet from "../components/BottomSheet";
 import DateSettingsSheet from "../components/DateSettingsSheet";
 import { exportTransactionsXLSX, exportTransactionsCSV, exportFilename } from "../lib/export";
 import { cn } from "../lib/utils";
-import type { DuplicateHandling, UserSettings } from "../types";
+import type { UserSettings } from "../types";
 
 const WEEK_DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -31,19 +31,12 @@ interface SettingsPageProps {
   onStartTour: () => void;
 }
 
-const duplicateOptions: { value: DuplicateHandling; label: string; desc: string }[] = [
-  { value: "expenses_only", label: "Expenses only", desc: "Only record the expense side of transfers" },
-  { value: "all", label: "Record all", desc: "Record both sender and receiver notifications" },
-  { value: "smart_merge", label: "Smart merge", desc: "Deduplicate matching transfer amounts" },
-];
-
 export default function SettingsPage({ monthStartDay, weekStartDay, onSetCycleStart, onStartTour }: SettingsPageProps) {
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [status, setStatus] = useState("");
   const [userEmail, setUserEmail] = useState("");
   const [queueCount, setQueueCount] = useState(0);
   const [copied, setCopied] = useState(false);
-  const [showDupPicker, setShowDupPicker] = useState(false);
   const [showExportPicker, setShowExportPicker] = useState(false);
   const [showDateSettings, setShowDateSettings] = useState(false);
 
@@ -52,13 +45,6 @@ export default function SettingsPage({ monthStartDay, weekStartDay, onSetCycleSt
     void supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email ?? ""));
     setQueueCount(getQueue().length);
   }, []);
-
-  const handleDuplicateChange = async (value: DuplicateHandling) => {
-    try {
-      const updated = await updateSettings({ duplicate_handling: value });
-      setSettings(updated);
-    } catch { setStatus("Failed to update."); }
-  };
 
   const handleRegisterPasskey = async () => {
     setStatus("Setting up...");
@@ -135,19 +121,6 @@ export default function SettingsPage({ monthStartDay, weekStartDay, onSetCycleSt
             <span className="text-[15px] font-medium">Sign Out</span>
           </button>
         </div>
-      </section>
-
-      {/* Duplicate Handling */}
-      <section className="mb-6">
-        <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Duplicate Handling</h2>
-        <p className="text-xs text-gray-400 mb-2">How to handle transfer notifications from both sender and receiver.</p>
-        <button
-          onClick={() => setShowDupPicker(true)}
-          className="w-full h-11 px-4 bg-gray-50 rounded-xl text-[15px] text-left flex items-center justify-between"
-        >
-          <span>{duplicateOptions.find((o) => o.value === settings.duplicate_handling)?.label ?? "Select"}</span>
-          <ChevronRight size={16} className="text-gray-300" />
-        </button>
       </section>
 
       {/* Date Cycle */}
@@ -256,32 +229,6 @@ export default function SettingsPage({ monthStartDay, weekStartDay, onSetCycleSt
       </section>
 
       {status && <p className="text-sm text-center text-gray-500 mt-2">{status}</p>}
-
-      {/* Duplicate Handling Picker */}
-      <BottomSheet open={showDupPicker} onClose={() => setShowDupPicker(false)}>
-        <h2 className="text-lg font-semibold mb-4">Duplicate Handling</h2>
-        <div className="space-y-2 min-w-[45vw] max-w-full">
-          {duplicateOptions.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => {
-                void handleDuplicateChange(opt.value);
-                setShowDupPicker(false);
-              }}
-              className={`w-full px-5 py-3.5 rounded-2xl text-left transition-all touch-manipulation ${
-                settings.duplicate_handling === opt.value
-                  ? "bg-[#4169e1] text-white"
-                  : "bg-gray-50 text-gray-700 active:bg-gray-100"
-              }`}
-            >
-              <div className="font-medium text-[15px]">{opt.label}</div>
-              <div className={`text-xs mt-0.5 ${
-                settings.duplicate_handling === opt.value ? "text-white/70" : "text-gray-400"
-              }`}>{opt.desc}</div>
-            </button>
-          ))}
-        </div>
-      </BottomSheet>
 
       <DateSettingsSheet
         open={showDateSettings}

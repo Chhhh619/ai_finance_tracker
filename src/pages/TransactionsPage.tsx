@@ -612,7 +612,7 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
                             </div>
                           </div>
                           <div className="text-right ml-4 shrink-0">
-                            <div className={`font-semibold text-[15px] ${getTransactionAmountClass(t.direction)}`}>
+                            <div className="font-semibold text-[15px] text-gray-900">
                               {formatTransactionAmount(Number(t.amount), t.direction)}
                             </div>
                             <div className="text-[10px] text-gray-400">
@@ -641,7 +641,7 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
                             </div>
                             <div className="flex justify-between">
                               <span className="text-gray-400">Amount</span>
-                              <span className={`font-semibold ${getTransactionAmountClass(t.direction)}`}>
+                              <span className="font-semibold text-gray-900">
                                 {formatTransactionAmount(Number(t.amount), t.direction)}
                               </span>
                             </div>

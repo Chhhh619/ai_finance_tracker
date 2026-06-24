@@ -9,5 +9,5 @@ export function formatTransactionAmount(amount: number, direction: Transaction["
 }
 
 export function getTransactionAmountClass(direction: Transaction["direction"]): string {
-  return direction === "income" ? "text-emerald-600" : "text-gray-900";
+  return direction === "income" ? "text-emerald-600" : "text-rose-400";
 }
