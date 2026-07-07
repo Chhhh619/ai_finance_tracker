@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { fetchSettings, fetchTransactions } from "../lib/api";
-import { signOut, registerPasskey } from "../lib/auth";
+import { signOut } from "../lib/auth";
 import { supabase } from "../lib/supabase";
 import { getQueue, flushQueue } from "../lib/offline-queue";
-import { LogOut, Fingerprint, Download, RefreshCw, ChevronRight, Copy, Check, FileSpreadsheet, FileText, Sparkles, ExternalLink, CalendarDays, PlayCircle } from "lucide-react";
+import { LogOut, Download, RefreshCw, ChevronRight, Copy, Check, FileSpreadsheet, FileText, Sparkles, ExternalLink, CalendarDays, PlayCircle } from "lucide-react";
 import { SHORTCUT_ICLOUD_URL } from "../lib/constants";
 import BottomSheet from "../components/BottomSheet";
 import DateSettingsSheet from "../components/DateSettingsSheet";
@@ -45,12 +45,6 @@ export default function SettingsPage({ monthStartDay, weekStartDay, onSetCycleSt
     void supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email ?? ""));
     setQueueCount(getQueue().length);
   }, []);
-
-  const handleRegisterPasskey = async () => {
-    setStatus("Setting up...");
-    const { error } = await registerPasskey();
-    setStatus(error ?? "Face ID enabled!");
-  };
 
   const handleExport = async (kind: "xlsx" | "csv") => {
     setStatus("Exporting...");
@@ -103,16 +97,6 @@ export default function SettingsPage({ monthStartDay, weekStartDay, onSetCycleSt
           <div className="px-4 py-3.5 border-b border-white">
             <div className="text-[15px] font-medium">{userEmail}</div>
           </div>
-          <button
-            onClick={() => void handleRegisterPasskey()}
-            className="w-full flex items-center justify-between px-4 py-3.5 border-b border-white active:bg-gray-100 transition-colors"
-          >
-            <div className="flex items-center gap-3">
-              <Fingerprint size={18} className="text-gray-500" />
-              <span className="text-[15px]">Enable Face ID</span>
-            </div>
-            <ChevronRight size={16} className="text-gray-300" />
-          </button>
           <button
             onClick={() => void signOut()}
             className="w-full flex items-center gap-3 px-4 py-3.5 text-red-500 active:bg-gray-100 transition-colors"

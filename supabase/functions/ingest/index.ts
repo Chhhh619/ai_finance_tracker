@@ -9,7 +9,8 @@ const corsHeaders = {
 
 const requestSchema = z.object({
   text: z.string().min(1).max(10000).optional(),
-  image: z.string().optional(), // base64 encoded image
+  // base64 encoded image; ~8M chars ≈ 6MB binary, plenty for a receipt photo
+  image: z.string().max(8_000_000).optional(),
   source: z.enum(["auto", "receipt"]).default("auto"),
   timestamp: z.string().optional(),
 });
@@ -51,6 +52,25 @@ function makeRequestId() {
   return Math.random().toString(36).slice(2, 10);
 }
 
+// Best-effort per-key rate limit (in-memory per isolate; resets on cold start).
+// Caps Gemini spend if an API key leaks — 20 captures per minute is far above
+// any legitimate usage.
+const RATE_LIMIT_MAX = 20;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const recentRequests = new Map<string, number[]>();
+
+function isRateLimited(apiKey: string): boolean {
+  const now = Date.now();
+  const hits = (recentRequests.get(apiKey) ?? []).filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
+  if (hits.length >= RATE_LIMIT_MAX) {
+    recentRequests.set(apiKey, hits);
+    return true;
+  }
+  hits.push(now);
+  recentRequests.set(apiKey, hits);
+  return false;
+}
+
 function log(requestId: string, stage: string, extra?: Record<string, unknown>) {
   const payload = { requestId, stage, ...(extra ?? {}) };
   console.log(JSON.stringify(payload));
@@ -63,7 +83,7 @@ async function callGeminiFlash(
   apiKey: string,
   source: string,
   requestId: string
-): Promise<z.infer<typeof llmResponseSchema> | null> {
+): Promise<{ transactions: z.infer<typeof llmResponseSchema> | null }> {
   const systemPrompt = [
     "You are a financial transaction extractor for a Malaysian budgeting app.",
     "Extract financial transactions from the input (bank notifications, e-wallet notifications, receipts, or any spending text).",
@@ -110,7 +130,7 @@ async function callGeminiFlash(
     parts.push({ inlineData: { mimeType, data: imageBase64 } });
   }
 
-  if (parts.length === 0) return null;
+  if (parts.length === 0) return { transactions: null };
 
   log(requestId, "gemini_fetch_start", {
     hasText: Boolean(text),
@@ -124,10 +144,11 @@ async function callGeminiFlash(
   let response: Response;
   try {
     response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        // Key travels in a header, not the URL — URLs end up in proxy/infra logs.
+        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
         body: JSON.stringify({
           system_instruction: { parts: [{ text: systemPrompt }] },
           contents: [{ parts }],
@@ -141,7 +162,7 @@ async function callGeminiFlash(
     );
   } catch (e) {
     log(requestId, "gemini_fetch_threw", { error: String(e), ms: Date.now() - geminiStart });
-    return { transactions: null, debug: { error: "Gemini fetch threw", detail: String(e) } };
+    return { transactions: null };
   }
 
   const geminiMs = Date.now() - geminiStart;
@@ -150,14 +171,14 @@ async function callGeminiFlash(
   if (!response.ok) {
     const errText = await response.text();
     log(requestId, "gemini_error", { status: response.status, body: errText.slice(0, 500) });
-    return { transactions: null, debug: { error: `Gemini ${response.status}`, detail: errText } };
+    return { transactions: null };
   }
 
   const data = await response.json();
   const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!content) {
     log(requestId, "gemini_no_content", { raw: JSON.stringify(data).slice(0, 500) });
-    return { transactions: null, debug: { error: "No content in Gemini response", raw: JSON.stringify(data).slice(0, 500) } };
+    return { transactions: null };
   }
 
   try {
@@ -165,13 +186,13 @@ async function callGeminiFlash(
     const validated = llmResponseSchema.safeParse(parsed);
     if (!validated.success) {
       log(requestId, "gemini_validation_failed", { issues: validated.error.issues, output: content.slice(0, 500) });
-      return { transactions: null, debug: { error: "Validation failed", llmOutput: content, zodErrors: validated.error.issues } };
+      return { transactions: null };
     }
     log(requestId, "gemini_parsed", { count: validated.data.length });
-    return { transactions: validated.data, debug: { llmOutput: content } };
+    return { transactions: validated.data };
   } catch (e) {
     log(requestId, "gemini_parse_failed", { error: String(e), output: content.slice(0, 500) });
-    return { transactions: null, debug: { error: "JSON parse failed", llmOutput: content, parseError: String(e) } };
+    return { transactions: null };
   }
 }
 
@@ -208,6 +229,11 @@ Deno.serve(async (req) => {
     if (!apiKey) {
       log(requestId, "auth_missing");
       return jsonResponse(401, { status: "error", message: "Missing API key" });
+    }
+
+    if (isRateLimited(apiKey)) {
+      log(requestId, "rate_limited");
+      return jsonResponse(429, { status: "error", message: "Too many requests — try again in a minute" });
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -282,11 +308,10 @@ Deno.serve(async (req) => {
 
     const geminiResult = await callGeminiFlash(body.text, body.image, categoryNames, geminiApiKey, body.source, requestId);
     const transactions = geminiResult.transactions;
-    const debug = geminiResult.debug;
 
     if (!transactions || transactions.length === 0) {
       log(requestId, "empty_result", { totalMs: Date.now() - startedAt });
-      return jsonResponse(200, { status: "empty", message: "🔍 No transaction found in this capture", debug });
+      return jsonResponse(200, { status: "empty", message: "🔍 No transaction found in this capture" });
     }
 
     const inserts = transactions.map((t) => ({
@@ -311,7 +336,7 @@ Deno.serve(async (req) => {
 
     if (insertError) {
       log(requestId, "insert_failed", { error: insertError.message, code: insertError.code, details: insertError.details });
-      return jsonResponse(500, { status: "error", message: "❌ Couldn't save — please try again", debug: { error: insertError.message } });
+      return jsonResponse(500, { status: "error", message: "❌ Couldn't save — please try again" });
     }
 
     const categoryById = new Map((categories ?? []).map((c: { id: string; name: string }) => [c.id, c.name]));
@@ -331,14 +356,11 @@ Deno.serve(async (req) => {
 
     log(requestId, "done", { inserted: inserted?.length ?? 0, totalMs: Date.now() - startedAt });
 
-    return jsonResponse(200, { status: "ok", entries: inserted, message, debug });
+    return jsonResponse(200, { status: "ok", entries: inserted, message });
   } catch (e) {
     const err = e as Error;
     log(requestId, "unhandled_error", { error: err.message, stack: err.stack, totalMs: Date.now() - startedAt });
-    return jsonResponse(500, {
-      status: "error",
-      message: `❌ Server error — ref ${requestId}`,
-      debug: { error: err.message, stack: err.stack },
-    });
+    // Internals stay in server logs; the client gets only the requestId for correlation.
+    return jsonResponse(500, { status: "error", message: `❌ Server error — ref ${requestId}` });
   }
 });
