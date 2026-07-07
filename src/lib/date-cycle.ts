@@ -42,3 +42,30 @@ export function getDayRange(now: Date): [Date, Date] {
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   return [start, endOfDay(start)];
 }
+
+// Offset-aware variants: offset 0 = the current period, 1 = one period back, etc.
+
+export function getDayRangeAt(now: Date, offset: number): [Date, Date] {
+  const anchor = new Date(now.getFullYear(), now.getMonth(), now.getDate() - offset);
+  return getDayRange(anchor);
+}
+
+export function getWeekRangeAt(now: Date, weekStartDay: number, offset: number): [Date, Date] {
+  const anchor = new Date(now.getFullYear(), now.getMonth(), now.getDate() - offset * 7);
+  return getWeekRange(anchor, weekStartDay);
+}
+
+export function getMonthRangeAt(now: Date, monthStartDay: number, offset: number): [Date, Date] {
+  const clampStart = (year: number, month: number) => {
+    const dim = daysInMonth(year, month);
+    return new Date(year, month, Math.min(monthStartDay, dim));
+  };
+
+  // Step the current cycle's start month back `offset` months, re-clamping so
+  // custom start days (e.g. 31st) land correctly in short months.
+  const [currentStart] = getMonthRange(now, monthStartDay);
+  const cycleStart = clampStart(currentStart.getFullYear(), currentStart.getMonth() - offset);
+  const nextCycleStart = clampStart(cycleStart.getFullYear(), cycleStart.getMonth() + 1);
+  const cycleEnd = endOfDay(new Date(nextCycleStart.getFullYear(), nextCycleStart.getMonth(), nextCycleStart.getDate() - 1));
+  return [cycleStart, cycleEnd];
+}
