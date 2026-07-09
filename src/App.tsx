@@ -19,6 +19,7 @@ function AppShell() {
   const [displayName, setDisplayName] = useState("Friend");
   const [monthStartDay, setMonthStartDay] = useState(1);
   const [weekStartDay, setWeekStartDay] = useState(0);
+  const [currency, setCurrency] = useState("MYR");
   const [refreshKey, setRefreshKey] = useState(0);
   const [showShortcutSheet, setShowShortcutSheet] = useState(false);
   const [showShortcutTour, setShowShortcutTour] = useState(false);
@@ -38,6 +39,7 @@ function AppShell() {
       if (s.display_name) setDisplayName(s.display_name);
       setMonthStartDay(s.month_start_day ?? 1);
       setWeekStartDay(s.week_start_day ?? 0);
+      setCurrency(s.default_currency ?? "MYR");
     }).catch(() => {});
     setRefreshKey((k) => k + 1);
   }, [loadCategories]);
@@ -96,6 +98,15 @@ function AppShell() {
     }
   }, []);
 
+  const handleSetCurrency = useCallback(async (code: string) => {
+    setCurrency(code);
+    try {
+      await updateSettings({ default_currency: code });
+    } catch {
+      // keep local value even if the DB update fails
+    }
+  }, []);
+
   return (
     <div className="max-w-md mx-auto min-h-screen bg-white safe-top pb-20">
       <div>
@@ -104,7 +115,7 @@ function AppShell() {
             path="/"
             element={
               <HomePage
-                key={refreshKey}
+                refreshKey={refreshKey}
                 categories={categories}
                 onDataChanged={handleDataChanged}
                 displayName={displayName}
@@ -112,12 +123,13 @@ function AppShell() {
                 monthStartDay={monthStartDay}
                 weekStartDay={weekStartDay}
                 onSetCycleStart={handleSetCycleStart}
+                accountCurrency={currency}
               />
             }
           />
-          <Route path="/transactions" element={<TransactionsPage categories={categories} monthStartDay={monthStartDay} weekStartDay={weekStartDay} />} />
+          <Route path="/transactions" element={<TransactionsPage categories={categories} monthStartDay={monthStartDay} weekStartDay={weekStartDay} accountCurrency={currency} />} />
           <Route path="/categories" element={<CategoriesPage categories={categories} onCategoriesChanged={loadCategories} />} />
-          <Route path="/settings" element={<SettingsPage monthStartDay={monthStartDay} weekStartDay={weekStartDay} onSetCycleStart={handleSetCycleStart} onStartTour={startTour} />} />
+          <Route path="/settings" element={<SettingsPage monthStartDay={monthStartDay} weekStartDay={weekStartDay} onSetCycleStart={handleSetCycleStart} onStartTour={startTour} currency={currency} onSetCurrency={handleSetCurrency} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>

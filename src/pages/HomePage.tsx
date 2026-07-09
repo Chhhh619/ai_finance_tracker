@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { Plus, X, Image as ImageIcon, CalendarDays } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { fetchTransactions, createManualTransaction, updateTransaction, deleteTransaction } from "../lib/api";
-import { getDayRange, getMonthRange, getWeekRange } from "../lib/date-cycle";
+import { getDayRangeAt, getMonthRangeAt, getWeekRangeAt } from "../lib/date-cycle";
 import { supabase } from "../lib/supabase";
 import { addToQueue, getQueue } from "../lib/offline-queue";
 import GradientPieChart from "../components/GradientPieChart";
@@ -15,6 +15,7 @@ import TransactionViewToggle from "../components/TransactionViewToggle";
 import type { Category, Transaction } from "../types";
 import { toLocalIsoWithOffset } from "../lib/datetime";
 import { formatTransactionAmount, getTransactionAmountClass, moneyFmt } from "../lib/money";
+import { fetchRate, convertAmount } from "../lib/fx";
 
 const relativeDate = (iso: string) => {
   const d = new Date(iso);
@@ -35,14 +36,23 @@ interface HomePageProps {
   monthStartDay: number;
   weekStartDay: number;
   onSetCycleStart: (month: number, week: number) => void;
+  // Bumped by the parent whenever data changes elsewhere (another save path,
+  // auth-token refresh). Used to trigger a refetch without remounting — a
+  // remount would wipe local navigation state (period, periodOffset).
+  refreshKey: number;
+  accountCurrency: string;
 }
 
 type TimePeriod = "day" | "week" | "month";
 
-export default function HomePage({ categories, onDataChanged, displayName, onSetName, monthStartDay, weekStartDay, onSetCycleStart }: HomePageProps) {
+const PERIOD_DOT_COUNT = 4;
+
+export default function HomePage({ categories, onDataChanged, displayName, onSetName, monthStartDay, weekStartDay, onSetCycleStart, refreshKey, accountCurrency }: HomePageProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [total, setTotal] = useState(0);
   const [period, setPeriod] = useState<TimePeriod>("month");
+  // 0 = current period, 1 = one period back, etc. Past only — never negative.
+  const [periodOffset, setPeriodOffset] = useState(0);
   const [showChart, setShowChart] = useState(false);
   const [showPeriodPicker, setShowPeriodPicker] = useState(false);
   const [showDateSettings, setShowDateSettings] = useState(false);
@@ -164,28 +174,50 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
     onDataChanged();
   };
 
-  const getDateRange = useCallback((p: TimePeriod): [string, string] => {
+  const handleRetryConversion = async (t: Transaction) => {
+    if (!t.original_currency || t.original_amount == null) return;
+    const rate = await fetchRate(t.original_currency, accountCurrency, t.transaction_at.slice(0, 10));
+    if (rate == null) {
+      setCaptureStatus(`Still couldn't fetch a rate for ${t.original_currency}. Try again later.`);
+      return;
+    }
+    const updated = await updateTransaction(t.id, {
+      amount: convertAmount(Number(t.original_amount), rate),
+      currency: accountCurrency,
+      exchange_rate: rate,
+      needs_review: false,
+    });
+    setTransactions((prev) => prev.map((x) => (x.id === t.id ? updated : x)));
+    onDataChanged();
+  };
+
+  // Changing granularity always returns to the current period.
+  useEffect(() => {
+    setPeriodOffset(0);
+  }, [period]);
+
+  const getDateRange = useCallback((p: TimePeriod, offset: number): [string, string] => {
     const now = new Date();
     const [from, to] =
-      p === "day" ? getDayRange(now) :
-      p === "week" ? getWeekRange(now, weekStartDay) :
-      getMonthRange(now, monthStartDay);
+      p === "day" ? getDayRangeAt(now, offset) :
+      p === "week" ? getWeekRangeAt(now, weekStartDay, offset) :
+      getMonthRangeAt(now, monthStartDay, offset);
     return [from.toISOString(), to.toISOString()];
   }, [monthStartDay, weekStartDay]);
 
   const loadData = useCallback(async () => {
     try {
-      const [fromDate, toDate] = getDateRange(period);
+      const [fromDate, toDate] = getDateRange(period, periodOffset);
       const txns = await fetchTransactions({ from_date: fromDate, to_date: toDate, limit: 100 });
       setTransactions(txns);
     } catch {
       // Will retry when auth token refreshes
     }
-  }, [period, getDateRange]);
+  }, [period, periodOffset, getDateRange]);
 
   useEffect(() => {
     void loadData();
-  }, [loadData]);
+  }, [loadData, refreshKey]);
 
   useEffect(() => {
     const onScroll = () => {
@@ -218,9 +250,25 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
   );
 
   const summaryTotal = useMemo(
-    () => selectedTransactions.reduce((sum, t) => sum + Number(t.amount), 0),
-    [selectedTransactions]
+    () => selectedTransactions
+      .filter((t) => (t.currency ?? accountCurrency) === accountCurrency)
+      .reduce((sum, t) => sum + Number(t.amount), 0),
+    [selectedTransactions, accountCurrency]
   );
+
+  const foreignRecords = useMemo(
+    () => selectedTransactions.filter((t) => (t.currency ?? accountCurrency) !== accountCurrency),
+    [selectedTransactions, accountCurrency]
+  );
+
+  const foreignBadge = useMemo(() => {
+    if (foreignRecords.length === 0) return null;
+    const codes = new Set(foreignRecords.map((t) => t.currency));
+    if (codes.size === 1) return `+ ${foreignRecords.length} in ${[...codes][0]}`;
+    return `+ ${foreignRecords.length} in ${codes.size} currencies`;
+  }, [foreignRecords]);
+
+  const recentSectionRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setTotal(summaryTotal);
@@ -230,6 +278,9 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
     const totals = new Map<string, { category: Category; total: number }>();
     for (const t of selectedTransactions) {
       if (!t.category) continue;
+      // Foreign-currency records are excluded from the headline total, so keep
+      // the breakdown consistent — otherwise category rows won't reconcile.
+      if ((t.currency ?? accountCurrency) !== accountCurrency) continue;
       const existing = totals.get(t.category.id);
       if (existing) existing.total += Number(t.amount);
       else totals.set(t.category.id, { category: t.category, total: Number(t.amount) });
@@ -240,7 +291,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
       ...i,
       percentage: (i.total / grandTotal) * 100,
     }));
-  }, [selectedTransactions]);
+  }, [selectedTransactions, accountCurrency]);
 
   const groupedTransactions = useMemo(() => {
     const groups = new Map<string, Transaction[]>();
@@ -254,13 +305,54 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
       label: relativeDate(txns[0].transaction_at),
       date: dateStr,
       transactions: txns,
-      dayTotal: txns.reduce((s, t) => s + Number(t.amount), 0),
+      dayTotal: txns.filter((t) => (t.currency ?? accountCurrency) === accountCurrency).reduce((s, t) => s + Number(t.amount), 0),
     }));
-  }, [selectedTransactions]);
+  }, [selectedTransactions, accountCurrency]);
 
   const summaryVerb = recentView === "expense" ? "spent" : "received";
 
-  const periodLabel = period === "day" ? "today" : period === "week" ? "this week" : "this month";
+  const periodLabel = useMemo(() => {
+    if (periodOffset === 0) {
+      return period === "day" ? "today" : period === "week" ? "this week" : "this month";
+    }
+    const [start] = getDateRange(period, periodOffset);
+    const startDate = new Date(start);
+    if (period === "day") {
+      return periodOffset === 1
+        ? "yesterday"
+        : `on ${startDate.toLocaleDateString("en-MY", { day: "numeric", month: "short" })}`;
+    }
+    if (period === "week") {
+      return periodOffset === 1
+        ? "last week"
+        : `week of ${startDate.toLocaleDateString("en-MY", { day: "numeric", month: "short" })}`;
+    }
+    return periodOffset === 1
+      ? "last month"
+      : `in ${startDate.toLocaleDateString("en-MY", { month: "long" })}`;
+  }, [period, periodOffset, getDateRange]);
+
+  const goBack = useCallback(() => setPeriodOffset((o) => o + 1), []);
+  const goForward = useCallback(() => setPeriodOffset((o) => Math.max(0, o - 1)), []);
+
+  const handleHeroDragEnd = (_: unknown, info: { offset: { x: number }; velocity: { x: number } }) => {
+    if (info.offset.x > 60 || info.velocity.x > 500) goBack();
+    else if (info.offset.x < -60 || info.velocity.x < -500) goForward();
+  };
+
+  // ←/→ navigate periods when nothing else owns the keyboard.
+  useEffect(() => {
+    const anySheetOpen = showCapture || showChart || showPeriodPicker || showDateSettings || showNameDialog;
+    const onKey = (e: KeyboardEvent) => {
+      if (anySheetOpen) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      if (e.key === "ArrowLeft") goBack();
+      else if (e.key === "ArrowRight") goForward();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showCapture, showChart, showPeriodPicker, showDateSettings, showNameDialog, goBack, goForward]);
 
   // Name dialog handlers
   const openNameDialog = () => {
@@ -310,11 +402,10 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
       if (result.status === "ok") {
         setCaptureStatus(result.message);
         setInputText("");
-        onDataChanged();
-        void loadData();
+        setPeriodOffset(0); // jump back to now so the new transaction is visible
+        onDataChanged(); // resetting offset + bumping refreshKey refetches the current period
       } else {
-        const debugMsg = result.debug ? `\n[Debug: ${JSON.stringify(result.debug).slice(0, 300)}]` : "";
-        setCaptureStatus((result.message ?? "No transaction detected.") + debugMsg);
+        setCaptureStatus(result.message ?? "No transaction detected.");
       }
     } catch (err) {
       addToQueue(text, "manual");
@@ -345,11 +436,10 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
 
       if (result.status === "ok") {
         setCaptureStatus(result.message);
-        onDataChanged();
-        void loadData();
+        setPeriodOffset(0); // jump back to now so the new transaction is visible
+        onDataChanged(); // resetting offset + bumping refreshKey refetches the current period
       } else {
-        const debugMsg = result.debug ? `\n[Debug: ${JSON.stringify(result.debug).slice(0, 300)}]` : "";
-        setCaptureStatus((result.message ?? "No transaction detected.") + debugMsg);
+        setCaptureStatus(result.message ?? "No transaction detected.");
       }
     } catch {
       setCaptureStatus("Failed to process image. Try again.");
@@ -371,22 +461,29 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
       });
       setCaptureStatus(`Recorded RM${amount.toFixed(2)} - ${manualMerchant.trim()}`);
       setManualAmount(""); setManualMerchant(""); setManualDate(new Date());
-      onDataChanged(); void loadData();
+      setPeriodOffset(0); // jump back to now so the new transaction is visible
+      onDataChanged(); // resetting offset + bumping refreshKey refetches the current period
     } catch { setCaptureStatus("Failed to save."); }
     finally { setIsProcessing(false); }
   };
 
   return (
     <div className="px-6 pt-4 pb-6">
-      {/* Hero */}
-      <div className="mb-10">
+      {/* Hero — swipe horizontally to move between periods */}
+      <motion.div
+        className="mb-10"
+        drag="x"
+        dragConstraints={{ left: 0, right: 0 }}
+        dragElastic={0.15}
+        onDragEnd={handleHeroDragEnd}
+      >
         <h1 className="text-[2.2rem] leading-[1.25] tracking-tight font-semibold">
           <button onClick={openNameDialog} className="text-[#4169e1] hover:text-[#3151c1] transition-colors">
             {displayName}
           </button>
-          , You have {summaryVerb}{" "}
+          , You {periodOffset === 0 ? "have " : ""}{summaryVerb}{" "}
           <button onClick={() => setShowChart(true)} className="text-[#4169e1] hover:text-[#3151c1] transition-colors">
-            {moneyFmt(total)}
+            {moneyFmt(total, accountCurrency)}
           </button>{" "}
           <button
             onClick={() => setShowPeriodPicker(true)}
@@ -396,7 +493,43 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
           </button>
           .
         </h1>
-      </div>
+
+        {/* Period dots: left→right = older→newer, rightmost = current period */}
+        <div className="flex items-center gap-1.5 mt-4" role="group" aria-label="Period navigation">
+          {periodOffset > PERIOD_DOT_COUNT - 1 && (
+            <span aria-hidden="true" className="text-gray-300 text-xs leading-none select-none mr-0.5">⋯</span>
+          )}
+          {Array.from({ length: PERIOD_DOT_COUNT }, (_, i) => {
+            const windowStart = Math.max(periodOffset, PERIOD_DOT_COUNT - 1);
+            const dotOffset = windowStart - i;
+            const unit = period === "day" ? "day" : period === "week" ? "week" : "month";
+            const label = dotOffset === 0 ? `Current ${unit}` : dotOffset === 1 ? `1 ${unit} ago` : `${dotOffset} ${unit}s ago`;
+            const active = dotOffset === periodOffset;
+            return (
+              <button
+                key={dotOffset}
+                onClick={() => setPeriodOffset(dotOffset)}
+                aria-label={label}
+                aria-current={active ? "true" : undefined}
+                className="p-1.5 -m-1"
+              >
+                <span
+                  className={`block w-1.5 h-1.5 rounded-full transition-colors ${active ? "bg-[#4169e1]" : "bg-gray-200"}`}
+                />
+              </button>
+            );
+          })}
+        </div>
+
+        {foreignBadge && (
+          <button
+            onClick={() => recentSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            className="mt-2 text-xs text-gray-400 underline decoration-dotted underline-offset-4 active:text-gray-600 transition-colors"
+          >
+            {foreignBadge} · not in total
+          </button>
+        )}
+      </motion.div>
 
       {/* Breakdown Chart */}
       {breakdown.length > 0 && (
@@ -430,7 +563,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                   width={45}
                 />
                 <Tooltip
-                  formatter={(value: number) => [moneyFmt(value), "Amount"]}
+                  formatter={(value) => [moneyFmt(Number(value ?? 0)), "Amount"]}
                   contentStyle={{ borderRadius: 12, border: "none", boxShadow: "0 4px 12px rgba(0,0,0,0.08)", fontSize: 13 }}
                   cursor={{ fill: "rgba(65,105,225,0.06)", radius: 8 }}
                 />
@@ -446,11 +579,13 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
       )}
 
       {/* Recent Transactions */}
-      <div>
+      <div ref={recentSectionRef}>
         <TransactionViewToggle value={recentView} onChange={setRecentView} className="mb-4" />
         <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-4">Recent</h2>
         {groupedTransactions.length === 0 ? (
-          <p className="text-gray-400 text-sm py-8 text-center">No {recentView} transactions yet.</p>
+          <p className="text-gray-400 text-sm py-8 text-center">
+            No {recentView} transactions {periodOffset === 0 ? "yet" : "in this period"}.
+          </p>
         ) : (
           <div className="space-y-6">
             {groupedTransactions.map((group) => (
@@ -458,7 +593,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-medium text-gray-400">{group.label}</span>
                   <span className={`text-xs font-medium ${getTransactionAmountClass(recentView)}`}>
-                    {formatTransactionAmount(group.dayTotal, recentView)}
+                    {formatTransactionAmount(group.dayTotal, recentView, accountCurrency)}
                   </span>
                 </div>
                 <div className="space-y-0.5">
@@ -547,7 +682,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                             </div>
                             <div className="text-right ml-4 shrink-0">
                                 <div className="font-semibold text-[15px] text-gray-900">
-                                  {formatTransactionAmount(Number(t.amount), t.direction)}
+                                  {formatTransactionAmount(Number(t.amount), t.direction, t.currency ?? accountCurrency)}
                                 </div>
                               <div className="text-[10px] text-gray-400">
                                 {new Date(t.transaction_at).toLocaleTimeString("en-MY", { hour: "2-digit", minute: "2-digit" })}
@@ -577,9 +712,30 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                               <div className="flex justify-between">
                                 <span className="text-gray-400">Amount</span>
                                 <span className="font-semibold text-gray-900">
-                                  {formatTransactionAmount(Number(t.amount), t.direction)}
+                                  {formatTransactionAmount(Number(t.amount), t.direction, t.currency ?? accountCurrency)}
                                 </span>
                               </div>
+                              {t.original_currency && t.original_amount != null && (
+                                <>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-400">Original</span>
+                                    <span>{moneyFmt(Number(t.original_amount), t.original_currency)}</span>
+                                  </div>
+                                  {t.exchange_rate != null ? (
+                                    <div className="flex justify-between">
+                                      <span className="text-gray-400">Rate</span>
+                                      <span>1 {t.original_currency} = {t.exchange_rate} {accountCurrency}</span>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      onClick={() => void handleRetryConversion(t)}
+                                      className="w-full mt-1 h-9 rounded-lg bg-[#4169e1] text-white text-xs font-medium active:bg-[#3151c1] transition-colors"
+                                    >
+                                      Retry conversion
+                                    </button>
+                                  )}
+                                </>
+                              )}
                               {t.confidence < 1 && (
                                 <div className="flex justify-between">
                                   <span className="text-gray-400">Confidence</span>
@@ -669,8 +825,8 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
           {(() => {
             const now = new Date();
             const fmtDay = (d: Date) => d.toLocaleDateString("en-MY", { day: "numeric", month: "short" });
-            const [weekFrom, weekTo] = getWeekRange(now, weekStartDay);
-            const [monthFrom, monthTo] = getMonthRange(now, monthStartDay);
+            const [weekFrom, weekTo] = getWeekRangeAt(now, weekStartDay, 0);
+            const [monthFrom, monthTo] = getMonthRangeAt(now, monthStartDay, 0);
             const monthRange =
               monthFrom.getMonth() === monthTo.getMonth() && monthFrom.getFullYear() === monthTo.getFullYear()
                 ? `${monthFrom.getDate()} – ${monthTo.getDate()} ${monthFrom.toLocaleDateString("en-MY", { month: "short" })}`
@@ -724,7 +880,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
             >
               <div className="p-6">
                 <div className="flex items-center justify-between mb-2">
-                  <h2 className="text-2xl font-bold">{moneyFmt(total)}</h2>
+                  <h2 className="text-2xl font-bold">{moneyFmt(total, accountCurrency)}</h2>
                   <button onClick={() => { setShowChart(false); setChartCategoryId(null); }} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
                     <X size={20} />
                   </button>
@@ -763,7 +919,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                                 <div className="text-xs text-gray-400">{Math.round(percentage)}%</div>
                               </div>
                             </div>
-                            <div className="font-semibold">{moneyFmt(catTotal)}</div>
+                            <div className="font-semibold">{moneyFmt(catTotal, accountCurrency)}</div>
                           </button>
 
                           {/* Expanded transaction list for this category */}
@@ -782,7 +938,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                                           </div>
                                         </div>
                                           <div className="font-semibold text-[14px] ml-4 shrink-0 text-gray-900">
-                                            {formatTransactionAmount(Number(t.amount), t.direction)}
+                                            {formatTransactionAmount(Number(t.amount), t.direction, t.currency ?? accountCurrency)}
                                           </div>
                                       </div>
                                     ))}

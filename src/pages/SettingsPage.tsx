@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { fetchSettings, fetchTransactions } from "../lib/api";
-import { signOut, registerPasskey } from "../lib/auth";
+import { signOut } from "../lib/auth";
 import { supabase } from "../lib/supabase";
 import { getQueue, flushQueue } from "../lib/offline-queue";
-import { LogOut, Fingerprint, Download, RefreshCw, ChevronRight, Copy, Check, FileSpreadsheet, FileText, Sparkles, ExternalLink, CalendarDays, PlayCircle } from "lucide-react";
+import { LogOut, Download, RefreshCw, ChevronRight, Copy, Check, FileSpreadsheet, FileText, Sparkles, ExternalLink, CalendarDays, PlayCircle, Coins } from "lucide-react";
 import { SHORTCUT_ICLOUD_URL } from "../lib/constants";
 import BottomSheet from "../components/BottomSheet";
 import DateSettingsSheet from "../components/DateSettingsSheet";
+import CurrencySettingsSheet from "../components/CurrencySettingsSheet";
 import { exportTransactionsXLSX, exportTransactionsCSV, exportFilename } from "../lib/export";
 import { cn } from "../lib/utils";
 import type { UserSettings } from "../types";
@@ -29,9 +30,11 @@ interface SettingsPageProps {
   weekStartDay: number;
   onSetCycleStart: (month: number, week: number) => void;
   onStartTour: () => void;
+  currency: string;
+  onSetCurrency: (code: string) => void;
 }
 
-export default function SettingsPage({ monthStartDay, weekStartDay, onSetCycleStart, onStartTour }: SettingsPageProps) {
+export default function SettingsPage({ monthStartDay, weekStartDay, onSetCycleStart, onStartTour, currency, onSetCurrency }: SettingsPageProps) {
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [status, setStatus] = useState("");
   const [userEmail, setUserEmail] = useState("");
@@ -39,18 +42,13 @@ export default function SettingsPage({ monthStartDay, weekStartDay, onSetCycleSt
   const [copied, setCopied] = useState(false);
   const [showExportPicker, setShowExportPicker] = useState(false);
   const [showDateSettings, setShowDateSettings] = useState(false);
+  const [showCurrencySettings, setShowCurrencySettings] = useState(false);
 
   useEffect(() => {
     void fetchSettings().then(setSettings);
     void supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email ?? ""));
     setQueueCount(getQueue().length);
   }, []);
-
-  const handleRegisterPasskey = async () => {
-    setStatus("Setting up...");
-    const { error } = await registerPasskey();
-    setStatus(error ?? "Face ID enabled!");
-  };
 
   const handleExport = async (kind: "xlsx" | "csv") => {
     setStatus("Exporting...");
@@ -104,16 +102,6 @@ export default function SettingsPage({ monthStartDay, weekStartDay, onSetCycleSt
             <div className="text-[15px] font-medium">{userEmail}</div>
           </div>
           <button
-            onClick={() => void handleRegisterPasskey()}
-            className="w-full flex items-center justify-between px-4 py-3.5 border-b border-white active:bg-gray-100 transition-colors"
-          >
-            <div className="flex items-center gap-3">
-              <Fingerprint size={18} className="text-gray-500" />
-              <span className="text-[15px]">Enable Face ID</span>
-            </div>
-            <ChevronRight size={16} className="text-gray-300" />
-          </button>
-          <button
             onClick={() => void signOut()}
             className="w-full flex items-center gap-3 px-4 py-3.5 text-red-500 active:bg-gray-100 transition-colors"
           >
@@ -138,6 +126,25 @@ export default function SettingsPage({ monthStartDay, weekStartDay, onSetCycleSt
               <div className="text-xs text-gray-500 truncate">
                 Starts {ordinal(monthStartDay)} of every month · {WEEK_DAY_NAMES[weekStartDay]}
               </div>
+            </div>
+          </div>
+          <ChevronRight size={16} className="text-gray-300 shrink-0" />
+        </button>
+      </section>
+
+      {/* Currency */}
+      <section className="mb-6">
+        <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Currency</h2>
+        <p className="text-xs text-gray-400 mb-2">Foreign captures are converted into this currency.</p>
+        <button
+          onClick={() => setShowCurrencySettings(true)}
+          className="w-full flex items-center justify-between gap-3 px-4 py-3.5 bg-gray-50 rounded-2xl active:bg-gray-100 transition-colors"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <Coins size={18} className="text-gray-500 shrink-0" />
+            <div className="min-w-0 text-left">
+              <div className="text-[15px] font-medium">Account Currency</div>
+              <div className="text-xs text-gray-500 truncate">{currency}</div>
             </div>
           </div>
           <ChevronRight size={16} className="text-gray-300 shrink-0" />
@@ -236,6 +243,14 @@ export default function SettingsPage({ monthStartDay, weekStartDay, onSetCycleSt
         monthStartDay={monthStartDay}
         weekStartDay={weekStartDay}
         onSave={onSetCycleStart}
+      />
+
+      <CurrencySettingsSheet
+        open={showCurrencySettings}
+        onClose={() => setShowCurrencySettings(false)}
+        currency={currency}
+        hasTransactions={true}
+        onSave={onSetCurrency}
       />
 
       <BottomSheet open={showExportPicker} onClose={() => setShowExportPicker(false)}>
