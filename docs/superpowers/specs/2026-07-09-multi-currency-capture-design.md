@@ -153,8 +153,11 @@ following the existing `log(requestId, stage, extra)` pattern.
 
 ### Edge cases
 
-- **Zero-decimal currencies** (JPY, KRW, IDR): `Intl` renders them with no
+- **Zero-decimal currencies** (JPY, KRW): `Intl` renders them with no
   decimals automatically; storage is a whole number in `decimal(12,2)`.
+  (Note: IDR is *not* zero-decimal — its ISO 4217 minor unit is 2, so `Intl`
+  renders it with 2 decimals. Only currencies with an ISO minor unit of 0 hit
+  this branch.)
 - **Same-day / weekend transactions:** Frankfurter returns the most recent
   published rate; the response's `date` field reports the actual rate date.
 - **Currencies outside Frankfurter's ~31** (e.g. VND, TWD): take the
@@ -174,7 +177,7 @@ pass in the running app:
    has `amount ≈ 7 × rate` in MYR, `currency = MYR`, `original_amount = 7`,
    `original_currency = SGD`, `exchange_rate` set; detail panel shows the
    Original and Rate rows; headline total includes it as an MYR record.
-2. **Zero-decimal branch:** a JPY or IDR receipt — confirm no-decimal display
+2. **Zero-decimal branch:** a JPY or KRW receipt — confirm no-decimal display
    and correct conversion.
 3. **Failed-FX branch:** a VND (unsupported) receipt — confirm it saves flagged,
    is excluded from the headline total, shows the "+ 1 in VND" badge, and the
