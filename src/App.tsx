@@ -104,7 +104,7 @@ function AppShell() {
             path="/"
             element={
               <HomePage
-                key={refreshKey}
+                refreshKey={refreshKey}
                 categories={categories}
                 onDataChanged={handleDataChanged}
                 displayName={displayName}

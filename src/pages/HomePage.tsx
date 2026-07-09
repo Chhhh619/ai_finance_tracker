@@ -35,13 +35,17 @@ interface HomePageProps {
   monthStartDay: number;
   weekStartDay: number;
   onSetCycleStart: (month: number, week: number) => void;
+  // Bumped by the parent whenever data changes elsewhere (another save path,
+  // auth-token refresh). Used to trigger a refetch without remounting — a
+  // remount would wipe local navigation state (period, periodOffset).
+  refreshKey: number;
 }
 
 type TimePeriod = "day" | "week" | "month";
 
 const PERIOD_DOT_COUNT = 4;
 
-export default function HomePage({ categories, onDataChanged, displayName, onSetName, monthStartDay, weekStartDay, onSetCycleStart }: HomePageProps) {
+export default function HomePage({ categories, onDataChanged, displayName, onSetName, monthStartDay, weekStartDay, onSetCycleStart, refreshKey }: HomePageProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [total, setTotal] = useState(0);
   const [period, setPeriod] = useState<TimePeriod>("month");
@@ -194,7 +198,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
 
   useEffect(() => {
     void loadData();
-  }, [loadData]);
+  }, [loadData, refreshKey]);
 
   useEffect(() => {
     const onScroll = () => {
@@ -361,8 +365,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
         setCaptureStatus(result.message);
         setInputText("");
         setPeriodOffset(0); // jump back to now so the new transaction is visible
-        onDataChanged();
-        void loadData();
+        onDataChanged(); // resetting offset + bumping refreshKey refetches the current period
       } else {
         setCaptureStatus(result.message ?? "No transaction detected.");
       }
@@ -396,8 +399,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
       if (result.status === "ok") {
         setCaptureStatus(result.message);
         setPeriodOffset(0); // jump back to now so the new transaction is visible
-        onDataChanged();
-        void loadData();
+        onDataChanged(); // resetting offset + bumping refreshKey refetches the current period
       } else {
         setCaptureStatus(result.message ?? "No transaction detected.");
       }
@@ -422,7 +424,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
       setCaptureStatus(`Recorded RM${amount.toFixed(2)} - ${manualMerchant.trim()}`);
       setManualAmount(""); setManualMerchant(""); setManualDate(new Date());
       setPeriodOffset(0); // jump back to now so the new transaction is visible
-      onDataChanged(); void loadData();
+      onDataChanged(); // resetting offset + bumping refreshKey refetches the current period
     } catch { setCaptureStatus("Failed to save."); }
     finally { setIsProcessing(false); }
   };
