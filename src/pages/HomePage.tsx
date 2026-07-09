@@ -278,6 +278,9 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
     const totals = new Map<string, { category: Category; total: number }>();
     for (const t of selectedTransactions) {
       if (!t.category) continue;
+      // Foreign-currency records are excluded from the headline total, so keep
+      // the breakdown consistent — otherwise category rows won't reconcile.
+      if ((t.currency ?? accountCurrency) !== accountCurrency) continue;
       const existing = totals.get(t.category.id);
       if (existing) existing.total += Number(t.amount);
       else totals.set(t.category.id, { category: t.category, total: Number(t.amount) });
@@ -288,7 +291,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
       ...i,
       percentage: (i.total / grandTotal) * 100,
     }));
-  }, [selectedTransactions]);
+  }, [selectedTransactions, accountCurrency]);
 
   const groupedTransactions = useMemo(() => {
     const groups = new Map<string, Transaction[]>();
