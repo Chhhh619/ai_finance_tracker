@@ -24,6 +24,9 @@ export interface Transaction {
   confidence: number;
   raw_text: string | null;
   needs_review: boolean;
+  original_amount?: number | null;
+  original_currency?: string | null;
+  exchange_rate?: number | null;
   created_at: string;
   transaction_at: string;
   category?: Category;
