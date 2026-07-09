@@ -10,8 +10,9 @@ import TransactionViewToggle from "../components/TransactionViewToggle";
 import Toast from "../components/Toast";
 import { exportTransactionsXLSX, exportTransactionsCSV, exportFilename } from "../lib/export";
 import type { Category, Transaction } from "../types";
-import { formatTransactionAmount, getTransactionAmountClass } from "../lib/money";
+import { formatTransactionAmount, getTransactionAmountClass, moneyFmt } from "../lib/money";
 import { toLocalIsoWithOffset } from "../lib/datetime";
+import { fetchRate, convertAmount } from "../lib/fx";
 
 const relativeDate = (iso: string) => {
   const d = new Date(iso);
@@ -32,9 +33,10 @@ interface TransactionsPageProps {
   categories: Category[];
   monthStartDay: number;
   weekStartDay: number;
+  accountCurrency: string;
 }
 
-export default function TransactionsPage({ categories, monthStartDay, weekStartDay }: TransactionsPageProps) {
+export default function TransactionsPage({ categories, monthStartDay, weekStartDay, accountCurrency }: TransactionsPageProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -186,8 +188,10 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
   );
 
   const periodTotal = useMemo(() =>
-    visibleTransactions.reduce((s, t) => s + Number(t.amount), 0),
-  [visibleTransactions]);
+    visibleTransactions
+      .filter((t) => (t.currency ?? accountCurrency) === accountCurrency)
+      .reduce((s, t) => s + Number(t.amount), 0),
+  [visibleTransactions, accountCurrency]);
 
   const handleTap = (t: Transaction) => {
     if (selectionMode) { toggleSelected(t.id); return; }
@@ -245,6 +249,22 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
     setTransactions((prev) => prev.filter((t) => t.id !== id));
     setEditingId(null);
     setDetailId(null);
+  };
+
+  const handleRetryConversion = async (t: Transaction) => {
+    if (!t.original_currency || t.original_amount == null) return;
+    const rate = await fetchRate(t.original_currency, accountCurrency, t.transaction_at.slice(0, 10));
+    if (rate == null) {
+      setToastMsg(`Still couldn't fetch a rate for ${t.original_currency}. Try again later.`);
+      return;
+    }
+    const updated = await updateTransaction(t.id, {
+      amount: convertAmount(Number(t.original_amount), rate),
+      currency: accountCurrency,
+      exchange_rate: rate,
+      needs_review: false,
+    });
+    setTransactions((prev) => prev.map((x) => (x.id === t.id ? updated : x)));
   };
 
   const handleDateSelect = (date: Date) => {
@@ -328,7 +348,7 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
       label: relativeDate(txns[0].transaction_at),
       date: dateStr,
       transactions: txns,
-      dayTotal: txns.reduce((s, t) => s + Number(t.amount), 0),
+      dayTotal: txns.filter((t) => (t.currency ?? accountCurrency) === accountCurrency).reduce((s, t) => s + Number(t.amount), 0),
     }));
   })();
 
@@ -445,7 +465,7 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
       {dateMode !== "all" && (
         <div className="mb-4 flex items-baseline gap-2">
           <span className={`text-2xl font-bold ${getTransactionAmountClass(transactionView)}`}>
-            {formatTransactionAmount(periodTotal, transactionView)}
+            {formatTransactionAmount(periodTotal, transactionView, accountCurrency)}
           </span>
           <span className="text-xs text-gray-400">{dateRange.label}</span>
         </div>
@@ -519,7 +539,7 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
               <div className="flex items-center justify-between mb-2 px-3">
                 <span className="text-xs font-medium text-gray-400">{group.label}</span>
                 <span className={`text-xs font-medium ${getTransactionAmountClass(transactionView)}`}>
-                  {formatTransactionAmount(group.dayTotal, transactionView)}
+                  {formatTransactionAmount(group.dayTotal, transactionView, accountCurrency)}
                 </span>
               </div>
               <div className="space-y-0.5">
@@ -613,7 +633,7 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
                           </div>
                           <div className="text-right ml-4 shrink-0">
                             <div className="font-semibold text-[15px] text-gray-900">
-                              {formatTransactionAmount(Number(t.amount), t.direction)}
+                              {formatTransactionAmount(Number(t.amount), t.direction, t.currency ?? accountCurrency)}
                             </div>
                             <div className="text-[10px] text-gray-400">
                               {new Date(t.transaction_at).toLocaleTimeString("en-MY", { hour: "2-digit", minute: "2-digit" })}
@@ -642,9 +662,30 @@ export default function TransactionsPage({ categories, monthStartDay, weekStartD
                             <div className="flex justify-between">
                               <span className="text-gray-400">Amount</span>
                               <span className="font-semibold text-gray-900">
-                                {formatTransactionAmount(Number(t.amount), t.direction)}
+                                {formatTransactionAmount(Number(t.amount), t.direction, t.currency ?? accountCurrency)}
                               </span>
                             </div>
+                            {t.original_currency && t.original_amount != null && (
+                              <>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400">Original</span>
+                                  <span>{moneyFmt(Number(t.original_amount), t.original_currency)}</span>
+                                </div>
+                                {t.exchange_rate != null ? (
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-400">Rate</span>
+                                    <span>1 {t.original_currency} = {t.exchange_rate} {accountCurrency}</span>
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={() => void handleRetryConversion(t)}
+                                    className="w-full mt-1 h-9 rounded-lg bg-[#4169e1] text-white text-xs font-medium active:bg-[#3151c1] transition-colors"
+                                  >
+                                    Retry conversion
+                                  </button>
+                                )}
+                              </>
+                            )}
                             {t.confidence < 1 && (
                               <div className="flex justify-between">
                                 <span className="text-gray-400">Confidence</span>

@@ -127,7 +127,7 @@ function AppShell() {
               />
             }
           />
-          <Route path="/transactions" element={<TransactionsPage categories={categories} monthStartDay={monthStartDay} weekStartDay={weekStartDay} />} />
+          <Route path="/transactions" element={<TransactionsPage categories={categories} monthStartDay={monthStartDay} weekStartDay={weekStartDay} accountCurrency={currency} />} />
           <Route path="/categories" element={<CategoriesPage categories={categories} onCategoriesChanged={loadCategories} />} />
           <Route path="/settings" element={<SettingsPage monthStartDay={monthStartDay} weekStartDay={weekStartDay} onSetCycleStart={handleSetCycleStart} onStartTour={startTour} currency={currency} onSetCurrency={handleSetCurrency} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
