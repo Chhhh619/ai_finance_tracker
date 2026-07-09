@@ -88,7 +88,7 @@ export async function fetchTransactions(filters: TransactionFilters = {}): Promi
 
 export async function updateTransaction(
   id: string,
-  updates: Partial<Pick<Transaction, "amount" | "merchant" | "description" | "category_id" | "direction" | "needs_review" | "transaction_at">>
+  updates: Partial<Pick<Transaction, "amount" | "merchant" | "description" | "category_id" | "direction" | "needs_review" | "transaction_at" | "currency" | "original_amount" | "original_currency" | "exchange_rate">>
 ): Promise<Transaction> {
   const { data, error } = await supabase
     .from("transactions")

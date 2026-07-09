@@ -15,6 +15,7 @@ import TransactionViewToggle from "../components/TransactionViewToggle";
 import type { Category, Transaction } from "../types";
 import { toLocalIsoWithOffset } from "../lib/datetime";
 import { formatTransactionAmount, getTransactionAmountClass, moneyFmt } from "../lib/money";
+import { fetchRate, convertAmount } from "../lib/fx";
 
 const relativeDate = (iso: string) => {
   const d = new Date(iso);
@@ -39,13 +40,14 @@ interface HomePageProps {
   // auth-token refresh). Used to trigger a refetch without remounting — a
   // remount would wipe local navigation state (period, periodOffset).
   refreshKey: number;
+  accountCurrency: string;
 }
 
 type TimePeriod = "day" | "week" | "month";
 
 const PERIOD_DOT_COUNT = 4;
 
-export default function HomePage({ categories, onDataChanged, displayName, onSetName, monthStartDay, weekStartDay, onSetCycleStart, refreshKey }: HomePageProps) {
+export default function HomePage({ categories, onDataChanged, displayName, onSetName, monthStartDay, weekStartDay, onSetCycleStart, refreshKey, accountCurrency }: HomePageProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [total, setTotal] = useState(0);
   const [period, setPeriod] = useState<TimePeriod>("month");
@@ -172,6 +174,23 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
     onDataChanged();
   };
 
+  const handleRetryConversion = async (t: Transaction) => {
+    if (!t.original_currency || t.original_amount == null) return;
+    const rate = await fetchRate(t.original_currency, accountCurrency, t.transaction_at.slice(0, 10));
+    if (rate == null) {
+      setCaptureStatus(`Still couldn't fetch a rate for ${t.original_currency}. Try again later.`);
+      return;
+    }
+    const updated = await updateTransaction(t.id, {
+      amount: convertAmount(Number(t.original_amount), rate),
+      currency: accountCurrency,
+      exchange_rate: rate,
+      needs_review: false,
+    });
+    setTransactions((prev) => prev.map((x) => (x.id === t.id ? updated : x)));
+    onDataChanged();
+  };
+
   // Changing granularity always returns to the current period.
   useEffect(() => {
     setPeriodOffset(0);
@@ -231,9 +250,25 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
   );
 
   const summaryTotal = useMemo(
-    () => selectedTransactions.reduce((sum, t) => sum + Number(t.amount), 0),
-    [selectedTransactions]
+    () => selectedTransactions
+      .filter((t) => (t.currency ?? accountCurrency) === accountCurrency)
+      .reduce((sum, t) => sum + Number(t.amount), 0),
+    [selectedTransactions, accountCurrency]
   );
+
+  const foreignRecords = useMemo(
+    () => selectedTransactions.filter((t) => (t.currency ?? accountCurrency) !== accountCurrency),
+    [selectedTransactions, accountCurrency]
+  );
+
+  const foreignBadge = useMemo(() => {
+    if (foreignRecords.length === 0) return null;
+    const codes = new Set(foreignRecords.map((t) => t.currency));
+    if (codes.size === 1) return `+ ${foreignRecords.length} in ${[...codes][0]}`;
+    return `+ ${foreignRecords.length} in ${codes.size} currencies`;
+  }, [foreignRecords]);
+
+  const recentSectionRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setTotal(summaryTotal);
@@ -267,9 +302,9 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
       label: relativeDate(txns[0].transaction_at),
       date: dateStr,
       transactions: txns,
-      dayTotal: txns.reduce((s, t) => s + Number(t.amount), 0),
+      dayTotal: txns.filter((t) => (t.currency ?? accountCurrency) === accountCurrency).reduce((s, t) => s + Number(t.amount), 0),
     }));
-  }, [selectedTransactions]);
+  }, [selectedTransactions, accountCurrency]);
 
   const summaryVerb = recentView === "expense" ? "spent" : "received";
 
@@ -445,7 +480,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
           </button>
           , You {periodOffset === 0 ? "have " : ""}{summaryVerb}{" "}
           <button onClick={() => setShowChart(true)} className="text-[#4169e1] hover:text-[#3151c1] transition-colors">
-            {moneyFmt(total)}
+            {moneyFmt(total, accountCurrency)}
           </button>{" "}
           <button
             onClick={() => setShowPeriodPicker(true)}
@@ -482,6 +517,15 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
             );
           })}
         </div>
+
+        {foreignBadge && (
+          <button
+            onClick={() => recentSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            className="mt-2 text-xs text-gray-400 underline decoration-dotted underline-offset-4 active:text-gray-600 transition-colors"
+          >
+            {foreignBadge} · not in total
+          </button>
+        )}
       </motion.div>
 
       {/* Breakdown Chart */}
@@ -532,7 +576,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
       )}
 
       {/* Recent Transactions */}
-      <div>
+      <div ref={recentSectionRef}>
         <TransactionViewToggle value={recentView} onChange={setRecentView} className="mb-4" />
         <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-4">Recent</h2>
         {groupedTransactions.length === 0 ? (
@@ -546,7 +590,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-medium text-gray-400">{group.label}</span>
                   <span className={`text-xs font-medium ${getTransactionAmountClass(recentView)}`}>
-                    {formatTransactionAmount(group.dayTotal, recentView)}
+                    {formatTransactionAmount(group.dayTotal, recentView, accountCurrency)}
                   </span>
                 </div>
                 <div className="space-y-0.5">
@@ -635,7 +679,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                             </div>
                             <div className="text-right ml-4 shrink-0">
                                 <div className="font-semibold text-[15px] text-gray-900">
-                                  {formatTransactionAmount(Number(t.amount), t.direction)}
+                                  {formatTransactionAmount(Number(t.amount), t.direction, t.currency ?? accountCurrency)}
                                 </div>
                               <div className="text-[10px] text-gray-400">
                                 {new Date(t.transaction_at).toLocaleTimeString("en-MY", { hour: "2-digit", minute: "2-digit" })}
@@ -665,9 +709,30 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                               <div className="flex justify-between">
                                 <span className="text-gray-400">Amount</span>
                                 <span className="font-semibold text-gray-900">
-                                  {formatTransactionAmount(Number(t.amount), t.direction)}
+                                  {formatTransactionAmount(Number(t.amount), t.direction, t.currency ?? accountCurrency)}
                                 </span>
                               </div>
+                              {t.original_currency && t.original_amount != null && (
+                                <>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-400">Original</span>
+                                    <span>{moneyFmt(Number(t.original_amount), t.original_currency)}</span>
+                                  </div>
+                                  {t.exchange_rate != null ? (
+                                    <div className="flex justify-between">
+                                      <span className="text-gray-400">Rate</span>
+                                      <span>1 {t.original_currency} = {t.exchange_rate} {accountCurrency}</span>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      onClick={() => void handleRetryConversion(t)}
+                                      className="w-full mt-1 h-9 rounded-lg bg-[#4169e1] text-white text-xs font-medium active:bg-[#3151c1] transition-colors"
+                                    >
+                                      Retry conversion
+                                    </button>
+                                  )}
+                                </>
+                              )}
                               {t.confidence < 1 && (
                                 <div className="flex justify-between">
                                   <span className="text-gray-400">Confidence</span>
@@ -812,7 +877,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
             >
               <div className="p-6">
                 <div className="flex items-center justify-between mb-2">
-                  <h2 className="text-2xl font-bold">{moneyFmt(total)}</h2>
+                  <h2 className="text-2xl font-bold">{moneyFmt(total, accountCurrency)}</h2>
                   <button onClick={() => { setShowChart(false); setChartCategoryId(null); }} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
                     <X size={20} />
                   </button>
@@ -851,7 +916,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                                 <div className="text-xs text-gray-400">{Math.round(percentage)}%</div>
                               </div>
                             </div>
-                            <div className="font-semibold">{moneyFmt(catTotal)}</div>
+                            <div className="font-semibold">{moneyFmt(catTotal, accountCurrency)}</div>
                           </button>
 
                           {/* Expanded transaction list for this category */}
@@ -870,7 +935,7 @@ export default function HomePage({ categories, onDataChanged, displayName, onSet
                                           </div>
                                         </div>
                                           <div className="font-semibold text-[14px] ml-4 shrink-0 text-gray-900">
-                                            {formatTransactionAmount(Number(t.amount), t.direction)}
+                                            {formatTransactionAmount(Number(t.amount), t.direction, t.currency ?? accountCurrency)}
                                           </div>
                                       </div>
                                     ))}
