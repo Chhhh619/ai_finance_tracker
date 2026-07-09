@@ -17,6 +17,7 @@ const requestSchema = z.object({
 
 const transactionSchema = z.object({
   amount: z.number().positive(),
+  currency: z.string().length(3).optional(),
   merchant: z.string().min(1),
   direction: z.enum(["expense", "income"]),
   category: z.string().min(1),
@@ -76,6 +77,68 @@ function log(requestId: string, stage: string, extra?: Record<string, unknown>) 
   console.log(JSON.stringify(payload));
 }
 
+// Fetches 1 `from` = ? `to` for a given date from Frankfurter (ECB rates).
+// Returns null on any failure or unsupported currency — caller then flags the
+// record for review rather than dropping it.
+async function fetchExchangeRate(
+  from: string,
+  to: string,
+  date: string,
+  requestId: string,
+  cache: Map<string, number | null>,
+): Promise<number | null> {
+  if (from === to) return 1;
+  const key = `${from}:${to}:${date}`;
+  if (cache.has(key)) return cache.get(key)!;
+
+  log(requestId, "fx_fetch_start", { from, to, date });
+  try {
+    const res = await fetch(
+      `https://api.frankfurter.dev/v1/${date}?base=${from}&symbols=${to}`,
+    );
+    if (!res.ok) {
+      log(requestId, "fx_fetch_failed", { from, to, date, status: res.status });
+      cache.set(key, null);
+      return null;
+    }
+    const data = await res.json();
+    const rate = data?.rates?.[to];
+    if (typeof rate !== "number") {
+      log(requestId, "fx_fetch_failed", { from, to, date, reason: "no_rate_in_response" });
+      cache.set(key, null);
+      return null;
+    }
+    log(requestId, "fx_fetch_done", { from, to, date, rate, rateDate: data.date });
+    cache.set(key, rate);
+    return rate;
+  } catch (e) {
+    log(requestId, "fx_fetch_failed", { from, to, date, error: String(e) });
+    cache.set(key, null);
+    return null;
+  }
+}
+
+// Minimal money formatter for the response message (Deno has Intl; cannot import
+// the browser money.ts). Mirrors src/lib/money.ts symbol/decimal rules.
+const MSG_SYMBOL_OVERRIDE: Record<string, string> = { MYR: "RM", SGD: "S$" };
+function fmtMoney(amount: number, currency: string): string {
+  const code = currency.toUpperCase();
+  let symbol = MSG_SYMBOL_OVERRIDE[code];
+  if (!symbol) {
+    try {
+      symbol = new Intl.NumberFormat("en", { style: "currency", currency: code, currencyDisplay: "narrowSymbol" })
+        .formatToParts(0).find((p) => p.type === "currency")?.value ?? code;
+    } catch {
+      symbol = code;
+    }
+  }
+  let digits = 2;
+  try {
+    digits = new Intl.NumberFormat("en", { style: "currency", currency: code }).resolvedOptions().maximumFractionDigits;
+  } catch { /* keep 2 */ }
+  return `${symbol}${Number(amount).toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+}
+
 async function callGeminiFlash(
   text: string | undefined,
   imageBase64: string | undefined,
@@ -98,7 +161,8 @@ async function callGeminiFlash(
     "If none fit well, use 'Others' and set confidence lower.",
     "",
     "For each transaction return a JSON object with:",
-    "- amount: number (positive, the final amount paid in MYR)",
+    "- amount: number (positive, the FINAL total as printed, in the currency you detected)",
+    "- currency: string (ISO 4217 code, e.g. 'MYR', 'SGD', 'USD', 'JPY'). Infer from the currency symbol (RM, S$, $, ¥, ฿, Rp), any explicit code, the store's country, or the language. Default to 'MYR' only if genuinely ambiguous.",
     "- merchant: string (business/store name, e.g. 'McDonald's', 'Grab', 'Touch n Go')",
     '- direction: "expense" or "income"',
     "- category: string (from the list above)",
@@ -314,20 +378,58 @@ Deno.serve(async (req) => {
       return jsonResponse(200, { status: "empty", message: "🔍 No transaction found in this capture" });
     }
 
-    const inserts = transactions.map((t) => ({
-      user_id: userId,
-      amount: t.amount,
-      currency: "MYR",
-      direction: t.direction,
-      merchant: t.merchant,
-      description: `${t.direction === "expense" ? "Paid" : "Received"} ${t.amount} - ${t.merchant}`,
-      category_id: categoryMap.get(t.category.toLowerCase()) ?? categoryMap.get(`${t.category.toLowerCase()} (${t.direction.toLowerCase()})`) ?? categoryMap.get("others") ?? null,
-      source: body.source === "receipt" ? "receipt" as const : t.source,
-      confidence: t.confidence,
-      raw_text: body.text ?? "(image)",
-      needs_review: t.confidence < 0.7,
-      transaction_at: normalizeTransactionAt(t.transaction_at ?? body.timestamp ?? new Date().toISOString()),
-    }));
+    const accountCurrency = String(settings.default_currency ?? "MYR").toUpperCase();
+    const rateCache = new Map<string, number | null>();
+    const inserts: Array<Record<string, unknown>> = [];
+
+    for (const t of transactions) {
+      const normalizedAt = normalizeTransactionAt(t.transaction_at ?? body.timestamp ?? new Date().toISOString());
+      const fromCurrency = (t.currency ?? accountCurrency).toUpperCase();
+
+      let amount = t.amount;
+      let currency = accountCurrency;
+      let originalAmount: number | null = null;
+      let originalCurrency: string | null = null;
+      let exchangeRate: number | null = null;
+      let needsReview = t.confidence < 0.7;
+
+      if (fromCurrency !== accountCurrency) {
+        const rateDate = normalizedAt.slice(0, 10); // YYYY-MM-DD
+        const rate = await fetchExchangeRate(fromCurrency, accountCurrency, rateDate, requestId, rateCache);
+        if (rate != null) {
+          amount = Math.round(t.amount * rate * 100) / 100;
+          originalAmount = t.amount;
+          originalCurrency = fromCurrency;
+          exchangeRate = rate;
+        } else {
+          // Conversion failed — keep the original amount/currency, flag for review.
+          amount = t.amount;
+          currency = fromCurrency;
+          originalAmount = t.amount;
+          originalCurrency = fromCurrency;
+          exchangeRate = null;
+          needsReview = true;
+        }
+      }
+
+      inserts.push({
+        user_id: userId,
+        amount,
+        currency,
+        original_amount: originalAmount,
+        original_currency: originalCurrency,
+        exchange_rate: exchangeRate,
+        direction: t.direction,
+        merchant: t.merchant,
+        description: `${t.direction === "expense" ? "Paid" : "Received"} ${amount} - ${t.merchant}`,
+        category_id: categoryMap.get(t.category.toLowerCase()) ?? categoryMap.get(`${t.category.toLowerCase()} (${t.direction.toLowerCase()})`) ?? categoryMap.get("others") ?? null,
+        source: body.source === "receipt" ? "receipt" as const : t.source,
+        confidence: t.confidence,
+        raw_text: body.text ?? "(image)",
+        needs_review: needsReview,
+        transaction_at: normalizedAt,
+      });
+    }
 
     const { data: inserted, error: insertError } = await supabase
       .from("transactions")
@@ -341,11 +443,15 @@ Deno.serve(async (req) => {
 
     const categoryById = new Map((categories ?? []).map((c: { id: string; name: string }) => [c.id, c.name]));
 
-    const lines = (inserted ?? []).map((t: { amount: number; merchant: string; direction: string; category_id: string | null; needs_review: boolean }) => {
+    const lines = (inserted ?? []).map((t: { amount: number; currency: string; merchant: string; direction: string; category_id: string | null; needs_review: boolean; original_amount: number | null; original_currency: string | null }) => {
       const arrow = t.direction === "expense" ? "−" : "+";
       const cat = t.category_id ? (categoryById.get(t.category_id) ?? "Others") : "Others";
       const review = t.needs_review ? " ⚠︎" : "";
-      return `${arrow}RM${Number(t.amount).toFixed(2)} · ${t.merchant} · ${cat}${review}`;
+      const main = fmtMoney(Number(t.amount), t.currency);
+      const orig = t.original_currency && t.original_amount != null
+        ? ` (${fmtMoney(Number(t.original_amount), t.original_currency)})`
+        : "";
+      return `${arrow}${main}${orig} · ${t.merchant} · ${cat}${review}`;
     });
 
     const header = inserted && inserted.length > 1
