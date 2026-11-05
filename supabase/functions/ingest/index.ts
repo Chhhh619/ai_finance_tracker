@@ -49,6 +49,14 @@ function normalizeTransactionAt(value: string): string {
   return trimmed;
 }
 
+// Current Malaysia time (fixed UTC+8, no DST), e.g. "Friday 2026-11-06T01:34:00+08:00".
+// The prompt needs the local date and weekday to resolve "Yesterday" / "Mon" correctly.
+function malaysiaNow(): string {
+  const local = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  const weekday = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][local.getUTCDay()];
+  return `${weekday} ${local.toISOString().slice(0, 19)}+08:00`;
+}
+
 function makeRequestId() {
   return Math.random().toString(36).slice(2, 10);
 }
@@ -168,7 +176,7 @@ async function callGeminiFlash(
     "- category: string (from the list above)",
     `- source: "${source === "receipt" ? "receipt" : "manual"}" (use this exact value)`,
     "- confidence: number 0-1",
-    `- transaction_at: ISO datetime string with an explicit timezone offset if visible, otherwise omit. If the source time is in Malaysia local time, use +08:00. The current date/time is ${new Date().toISOString()} (UTC). If the source shows only a date like "14 Apr" or "14/04" without a year, assume the current year. Never invent a year — if no date is visible at all, omit this field.`,
+    `- transaction_at: ISO datetime string with an explicit timezone offset. Phone notification times are Malaysia local time; if the source time is in Malaysia local time, use +08:00. The current Malaysia date/time is ${malaysiaNow()}. Resolve relative dates against it: "Today" is the current date, "Yesterday" is the day before, and a weekday name like "Mon" is the most recent past day with that name. If the source shows only a date like "14 Apr" or "14/04" without a year, assume the current year. Never invent a year — if no date or relative day is visible at all, omit this field (do not fill in the current time).`,
     "",
     "Return a JSON array only. No markdown, no explanation.",
     "If no financial transaction is found, return: []",
@@ -208,7 +216,7 @@ async function callGeminiFlash(
   let response: Response;
   try {
     response = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
       {
         method: "POST",
         // Key travels in a header, not the URL — URLs end up in proxy/infra logs.
@@ -216,10 +224,11 @@ async function callGeminiFlash(
         body: JSON.stringify({
           system_instruction: { parts: [{ text: systemPrompt }] },
           contents: [{ parts }],
+          // Gemini 3.x: no custom temperature/top_p/top_k, and thinking_level replaces
+          // thinking_budget (sending both is a 400). MINIMAL is the closest to "off".
           generationConfig: {
-            temperature: 0.1,
             responseMimeType: "application/json",
-            thinking_config: { thinking_budget: 0 },
+            thinking_config: { thinking_level: "MINIMAL" },
           },
         }),
       }
@@ -239,6 +248,8 @@ async function callGeminiFlash(
   }
 
   const data = await response.json();
+  // Token counts (incl. thoughtsTokenCount) — the only record of what each capture costs.
+  log(requestId, "gemini_usage", { usage: data.usageMetadata ?? null });
   const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!content) {
     log(requestId, "gemini_no_content", { raw: JSON.stringify(data).slice(0, 500) });
